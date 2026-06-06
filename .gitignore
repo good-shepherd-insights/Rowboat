@@ -4,3 +4,7 @@
 data/
 .venv/
 .claude/
+
+# Mastra CLI local project metadata (tied to a personal org)
+.mastra-project.json
+.mastra/

@@ -9,9 +9,19 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { LlmModelConfig, LlmProvider } from "@x/shared/dist/models.js";
 import z from "zod";
 import { getGatewayProvider } from "./gateway.js";
+import { MASTRA_API_KEY, MASTRA_BASE_URL } from "../config/env.js";
 
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
+
+// Per-request header used by the Mastra Memory Gateway to attribute the
+// request to our Mastra project for observability and analytics. The user's
+// provider key is sent as `Authorization` (the SDK's default); the gateway
+// uses the provider key for the upstream call and the Mastra key only for
+// attribution.
+const MASTRA_PASSTHROUGH_HEADERS: Record<string, string> = MASTRA_API_KEY
+    ? { "X-Memory-Gateway-Authorization": `Bearer ${MASTRA_API_KEY}` }
+    : {};
 
 export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
     const { apiKey, baseURL, headers } = config;
@@ -19,8 +29,8 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
         case "openai":
             return createOpenAI({
                 apiKey,
-                baseURL,
-                headers,
+                baseURL: MASTRA_BASE_URL,
+                headers: { ...MASTRA_PASSTHROUGH_HEADERS, ...headers },
             });
         case "aigateway":
             return createGateway({
@@ -31,14 +41,14 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
         case "anthropic":
             return createAnthropic({
                 apiKey,
-                baseURL,
-                headers,
+                baseURL: MASTRA_BASE_URL,
+                headers: { ...MASTRA_PASSTHROUGH_HEADERS, ...headers },
             });
         case "google":
             return createGoogleGenerativeAI({
                 apiKey,
-                baseURL,
-                headers,
+                baseURL: MASTRA_BASE_URL,
+                headers: { ...MASTRA_PASSTHROUGH_HEADERS, ...headers },
             });
         case "ollama": {
             // ollama-ai-provider-v2 expects baseURL to include /api
