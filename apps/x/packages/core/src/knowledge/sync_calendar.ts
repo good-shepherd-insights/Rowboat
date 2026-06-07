@@ -8,6 +8,10 @@ import { GoogleClientFactory } from './google-client-factory.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Calendar');
+
 
 const MAX_EVENTS_IN_DIGEST = 50;
 const MAX_DESCRIPTION_CHARS = 500;
@@ -132,7 +136,7 @@ async function publishCalendarSyncEvent(
             payload: summarizeCalendarSync(newEvents, updatedEvents, deletedEventIds),
         });
     } catch (err) {
-        console.error('[Calendar] Failed to publish sync event:', err);
+        log.error('Failed to publish sync event:', err);
     }
 }
 
@@ -150,7 +154,7 @@ let wakeResolve: (() => void) | null = null;
 
 export function triggerSync(): void {
     if (wakeResolve) {
-        console.log('[Calendar] Triggered - waking up immediately');
+        log.debug('Triggered - waking up immediately');
         wakeResolve();
         wakeResolve = null;
     }
@@ -207,10 +211,10 @@ function cleanUpOldFiles(currentEventIds: Set<string>, syncDir: string): string[
         if (eventId && !currentEventIds.has(eventId)) {
             try {
                 fs.unlinkSync(path.join(syncDir, filename));
-                console.log(`Removed old/out-of-window file: ${filename}`);
+                log.debug(`Removed old/out-of-window file: ${filename}`);
                 deleted.push(filename);
             } catch (e) {
-                console.error(`Error deleting file ${filename}:`, e);
+                log.error(`Error deleting file ${filename}:`, e);
             }
         }
     }
@@ -236,7 +240,7 @@ async function saveEvent(event: cal.Schema$Event, syncDir: string): Promise<{ ch
         fs.writeFileSync(filePath, content);
         return { changed: true, isNew: !exists, title: event.summary || eventId };
     } catch (e) {
-        console.error(`Error saving event ${eventId}:`, e);
+        log.error(`Error saving event ${eventId}:`, e);
         return { changed: false, isNew: false, title: event.summary || eventId };
     }
 }
@@ -288,9 +292,9 @@ async function processAttachments(drive: drive.Drive, event: cal.Schema$Event, s
 
                 fs.writeFileSync(filePath, frontmatter + md);
                 savedCount++;
-                console.log(`Synced Note: ${att.title} for event ${eventTitle}`);
+                log.debug(`Synced Note: ${att.title} for event ${eventTitle}`);
             } catch (e) {
-                console.error(`Failed to download note ${att.title}:`, e);
+                log.error(`Failed to download note ${att.title}:`, e);
             }
         }
     }
@@ -306,7 +310,7 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
     const timeMin = new Date(now.getTime() - lookbackMs).toISOString();
     const timeMax = new Date(now.getTime() + twoWeeksForwardMs).toISOString();
 
-    console.log(`Syncing calendar from ${timeMin} to ${timeMax} (lookback: ${lookbackDays} days)...`);
+    log.debug(`Syncing calendar from ${timeMin} to ${timeMax} (lookback: ${lookbackDays} days)...`);
 
     const calendar = google.calendar({ version: 'v3', auth });
     const drive = google.drive({ version: 'v3', auth });
@@ -346,9 +350,9 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
         const currentEventIds = new Set<string>();
 
         if (events.length === 0) {
-            console.log("No events found in this window.");
+            log.debug("No events found in this window.");
         } else {
-            console.log(`Found ${events.length} events.`);
+            log.debug(`Found ${events.length} events.`);
             for (const event of events) {
                 if (event.id) {
                     if (!shouldSyncCalendarEvent(event)) {
@@ -423,7 +427,7 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
         }
 
     } catch (error) {
-        console.error("An error occurred during calendar sync:", error);
+        log.error("An error occurred during calendar sync:", error);
         if (runId) {
             await serviceLogger.log({
                 type: 'error',
@@ -446,7 +450,7 @@ async function syncCalendarWindow(auth: OAuth2Client, syncDir: string, lookbackD
         // If 401, clear tokens to force re-auth next run
         const e = error as { response?: { status?: number } };
         if (e.response?.status === 401) {
-            console.log("401 Unauthorized, clearing cache");
+            log.debug("401 Unauthorized, clearing cache");
             GoogleClientFactory.clearCache();
         }
         throw error; // Re-throw to be handled by performSync
@@ -462,42 +466,42 @@ async function performSync(syncDir: string, lookbackDays: number) {
 
         const auth = await GoogleClientFactory.getClient();
         if (!auth) {
-            console.log("No valid OAuth credentials available.");
+            log.debug("No valid OAuth credentials available.");
             return;
         }
 
-        console.log("Authorization successful. Starting sync...");
+        log.debug("Authorization successful. Starting sync...");
         await syncCalendarWindow(auth, syncDir, lookbackDays);
-        console.log("Sync completed.");
+        log.debug("Sync completed.");
     } catch (error) {
-        console.error("Error during sync:", error);
+        log.error("Error during sync:", error);
         // If 401, clear tokens to force re-auth next run
         const e = error as { response?: { status?: number } };
         if (e.response?.status === 401) {
-            console.log("401 Unauthorized, clearing cache");
+            log.debug("401 Unauthorized, clearing cache");
             GoogleClientFactory.clearCache();
         }
     }
 }
 
 export async function init() {
-    console.log("Starting Google Calendar & Notes Sync (TS)...");
-    console.log(`Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
+    log.debug("Starting Google Calendar & Notes Sync (TS)...");
+    log.debug(`Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
 
     while (true) {
         try {
             const hasCredentials = await GoogleClientFactory.hasValidCredentials(REQUIRED_SCOPES);
             if (!hasCredentials) {
-                console.log("Google OAuth credentials not available or missing required Calendar/Drive scopes. Sleeping...");
+                log.debug("Google OAuth credentials not available or missing required Calendar/Drive scopes. Sleeping...");
             } else {
                 await performSync(SYNC_DIR, LOOKBACK_DAYS);
             }
         } catch (error) {
-            console.error("Error in main loop:", error);
+            log.error("Error in main loop:", error);
         }
 
         // Sleep for N minutes before next check (can be interrupted by triggerSync)
-        console.log(`Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
+        log.debug(`Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
         await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }

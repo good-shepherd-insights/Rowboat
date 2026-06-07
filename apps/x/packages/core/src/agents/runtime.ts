@@ -27,7 +27,7 @@ import { IMessageQueue, type MiddlePaneContext } from "../application/lib/messag
 import { IRunsRepo } from "../runs/repo.js";
 import { IRunsLock } from "../runs/lock.js";
 import { IAbortRegistry } from "../runs/abort-registry.js";
-import { PrefixLogger } from "@x/shared";
+import { rootLogger } from "@x/shared";
 import { parse } from "yaml";
 import { captureLlmUsage } from "../analytics/usage.js";
 import { enterUseCase, withUseCase, type UseCase } from "../analytics/use_case.js";
@@ -367,7 +367,7 @@ export class AgentRuntime implements IAgentRuntime {
 
     async trigger(runId: string): Promise<void> {
         if (!await this.runsLock.lock(runId)) {
-            console.log(`unable to acquire lock on run ${runId}`);
+            rootLogger.warn(`unable to acquire lock on run ${runId}`);
             return;
         }
         const signal = this.abortRegistry.createForRun(runId);
@@ -435,7 +435,7 @@ export class AgentRuntime implements IAgentRuntime {
                 await this.bus.publish(stoppedEvent);
             }
         } catch (error) {
-            console.error(`Run ${runId} failed:`, error);
+            rootLogger.error(`Run ${runId} failed:`, error);
             const message = error instanceof Error
                 ? unwrapAiError(error)
                 : typeof error === "string" ? error : JSON.stringify(error);
@@ -872,7 +872,7 @@ async function buildTools(agent: z.infer<typeof Agent>): Promise<ToolSet> {
             }
             tools[name] = await mapAgentTool(tool);
         } catch (error) {
-            console.error(`Error mapping tool ${name}:`, error);
+            rootLogger.error(`Error mapping tool ${name}:`, error);
             continue;
         }
     }
@@ -1109,7 +1109,7 @@ export async function* streamAgent({
     abortRegistry: IAbortRegistry;
     bus: IBus;
 }): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
-    const logger = new PrefixLogger(`run-${runId}-${state.agentName}`);
+    const logger = rootLogger.child(`run-${runId}-${state.agentName}`);
 
     async function* processEvent(event: z.infer<typeof RunEvent>): AsyncGenerator<z.infer<typeof RunEvent>, void, unknown> {
         state.ingest(event);
@@ -1157,23 +1157,23 @@ export async function* streamAgent({
 
         loopCounter++;
         const loopLogger = logger.child(`iter-${loopCounter}`);
-        loopLogger.log('starting loop iteration');
+        loopLogger.debug('starting loop iteration');
 
         // execute any pending tool calls
         for (const toolCallId of Object.keys(state.pendingToolCalls)) {
             const toolCall = state.toolCallIdMap[toolCallId];
             const _logger = loopLogger.child(`tc-${toolCallId}-${toolCall.toolName}`);
-            _logger.log('processing');
+            _logger.debug('processing');
 
             // if ask-human, skip
             if (toolCall.toolName === "ask-human") {
-                _logger.log('skipping, reason: ask-human');
+                _logger.debug('skipping, reason: ask-human');
                 continue;
             }
 
             // if tool has been denied, deny
             if (state.deniedToolCallIds[toolCallId]) {
-                _logger.log('returning denied tool message, reason: tool has been denied');
+                _logger.debug('returning denied tool message, reason: tool has been denied');
                 yield* processEvent({
                     runId,
                     messageId: await idGenerator.next(),
@@ -1191,17 +1191,17 @@ export async function* streamAgent({
 
             // if permission is pending on this tool call, skip execution
             if (state.pendingToolPermissionRequests[toolCallId]) {
-                _logger.log('skipping, reason: permission is pending');
+                _logger.debug('skipping, reason: permission is pending');
                 continue;
             }
 
             // execute approved tool
             // Check abort before starting tool execution
             if (signal.aborted) {
-                _logger.log('skipping, reason: aborted');
+                _logger.debug('skipping, reason: aborted');
                 break;
             }
-            _logger.log('executing tool');
+            _logger.debug('executing tool');
             yield* processEvent({
                 runId,
                 type: "tool-invocation",
@@ -1246,7 +1246,7 @@ export async function* streamAgent({
                     throw error;
                 }
                 const message = error instanceof Error ? (error.message || error.name) : String(error);
-                _logger.log('tool failed', message);
+                _logger.error('tool failed', message);
                 result = {
                     success: false,
                     error: message,
@@ -1279,7 +1279,7 @@ export async function* streamAgent({
 
         // if waiting on user permission or ask-human, exit
         if (state.getPendingAskHumans().length || state.getPendingPermissions().length) {
-            loopLogger.log('exiting loop, reason: pending asks or permissions');
+            loopLogger.debug('exiting loop, reason: pending asks or permissions');
             return;
         }
 
@@ -1304,7 +1304,7 @@ export async function* streamAgent({
             // Middle pane is NOT sticky — it should reflect the state at the moment of the
             // latest user message. If the user closed the pane between messages, clear it.
             middlePaneContext = msg.middlePaneContext ?? null;
-            loopLogger.log('dequeued user message', msg.messageId);
+            loopLogger.debug('dequeued user message', msg.messageId);
             const userMessageContext = buildUserMessageContext({
                 agentName: state.agentName,
                 middlePaneContext,
@@ -1330,12 +1330,12 @@ export async function* streamAgent({
                 || !lastMessage.content.some(part => part.type === "tool-call")
             )
         ) {
-            loopLogger.log('exiting loop, reason: last message is from assistant and text');
+            loopLogger.debug('exiting loop, reason: last message is from assistant and text');
             return;
         }
 
         // run one LLM turn.
-        loopLogger.log('running llm turn');
+        loopLogger.debug('running llm turn');
         // stream agent response and build message
         const messageBuilder = new StreamStepMessageBuilder();
         let instructionsWithDateTime = `${agent.instructions}\n\n${USER_CONTEXT_SYSTEM_INSTRUCTIONS}`;
@@ -1347,7 +1347,7 @@ export async function* streamAgent({
             }
             const userWorkDir = loadUserWorkDir(runId);
             if (userWorkDir) {
-                loopLogger.log('injecting user work directory', userWorkDir);
+                loopLogger.debug('injecting user work directory', userWorkDir);
                 instructionsWithDateTime += `\n\n# User Work Directory
 The user has chosen the following directory as their current **work directory**:
 
@@ -1369,22 +1369,22 @@ Do not announce the work directory unless it's relevant. Just use it.`;
             }
         }
         if (voiceInput) {
-            loopLogger.log('voice input enabled, injecting voice input prompt');
+            loopLogger.debug('voice input enabled, injecting voice input prompt');
             instructionsWithDateTime += `\n\n# Voice Input\nThe user's message was transcribed from speech. Be aware that:\n- There may be transcription errors. Silently correct obvious ones (e.g. homophones, misheard words). If an error is genuinely ambiguous, briefly mention your interpretation (e.g. "I'm assuming you meant X").\n- Spoken messages are often long-winded. The user may ramble, repeat themselves, or correct something they said earlier in the same message. Focus on their final intent, not every word verbatim.`;
         }
         if (voiceOutput === 'summary') {
-            loopLogger.log('voice output enabled (summary mode), injecting voice output prompt');
+            loopLogger.debug('voice output enabled (summary mode), injecting voice output prompt');
             instructionsWithDateTime += `\n\n# Voice Output (MANDATORY — READ THIS FIRST)\nThe user has voice output enabled. THIS IS YOUR #1 PRIORITY: you MUST start your response with <voice></voice> tags. If your response does not begin with <voice> tags, the user will hear nothing — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. Do not start with markdown, headings, or any other text. The literal first characters of your response must be "<voice>".\n2. Place ALL <voice> tags at the BEGINNING of your response, before any detailed content. Do NOT intersperse <voice> tags throughout the response.\n3. Wrap EACH spoken sentence in its own separate <voice> tag so it can be spoken incrementally. Do NOT wrap everything in a single <voice> block.\n4. Use voice as a TL;DR and navigation aid — do NOT read the entire response aloud.\n5. After all <voice> tags, you may include detailed written content (markdown, tables, code, etc.) that will be shown visually but not spoken.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things: the Q2 roadmap timeline, hiring for the backend role, and the client demo next week.</voice>\n<voice>I've pulled out the key details and action items below — the demo prep notes are at the end.</voice>\n\n## Meeting with Alex — March 11\n### Roadmap\n- Agreed to push Q2 launch to April 15...\n(detailed written content continues)\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You have five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you requested and Taylor flagged a contract issue.</voice>\n<voice>There's also a warm intro from a VC partner connecting you with someone at a prospective customer.</voice>\n<voice>I've drafted responses for three of them. The details and drafts are below.</voice>\n\n(email blocks, tables, and detailed content follow)\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a pretty packed day — seven meetings starting with standup at 9.</voice>\n<voice>The big ones are your investor call at 11, lunch with a partner from your lead VC at 12:30, and a customer call at 4.</voice>\n<voice>Your only free block for deep work is 2:30 to 4.</voice>\n\n(calendar block with full event details follows)\n\nExample 4 — User asks: "draft an email to Sam with our metrics"\n\n<voice>Done — I've drafted the email to Sam with your latest WAU and churn numbers.</voice>\n<voice>Take a look at the draft below and send it when you're ready.</voice>\n\n(email block with draft follows)\n\nREMEMBER: If you do not start with <voice> tags, the user hears silence. Always speak first, then write.`;
         } else if (voiceOutput === 'full') {
-            loopLogger.log('voice output enabled (full mode), injecting voice output prompt');
+            loopLogger.debug('voice output enabled (full mode), injecting voice output prompt');
             instructionsWithDateTime += `\n\n# Voice Output — Full Read-Aloud (MANDATORY — READ THIS FIRST)\nThe user wants your ENTIRE response spoken aloud. THIS IS YOUR #1 PRIORITY: every single sentence must be wrapped in <voice></voice> tags. If you write anything outside <voice> tags, the user will not hear it — which is a broken experience. NEVER skip this.\n\nRules:\n1. YOUR VERY FIRST OUTPUT MUST BE A <voice> TAG. No exceptions. The literal first characters of your response must be "<voice>".\n2. Wrap EACH sentence in its own separate <voice> tag so it can be spoken incrementally.\n3. Write your response in a natural, conversational style suitable for listening — no markdown headings, bullet points, or formatting symbols. Use plain spoken language.\n4. Structure the content as if you are speaking to the user directly. Use transitions like "first", "also", "one more thing" instead of visual formatting.\n5. EVERY sentence MUST be inside a <voice> tag. Do not leave ANY content outside <voice> tags. If it's not in a <voice> tag, the user cannot hear it.\n\n## Examples\n\nExample 1 — User asks: "what happened in my meeting with Alex yesterday?"\n\n<voice>Your meeting with Alex covered three main things.</voice>\n<voice>First, you discussed the Q2 roadmap timeline and agreed to push the launch to April.</voice>\n<voice>Second, you talked about hiring for the backend role — Alex will send over two candidates by Friday.</voice>\n<voice>And lastly, the client demo is next week on Thursday at 2pm, and you're handling the intro slides.</voice>\n\nExample 2 — User asks: "summarize my emails"\n\n<voice>You've got five new emails since this morning.</voice>\n<voice>Two are from your team — Jordan sent the RFC you asked for, and Taylor flagged a contract issue that needs your sign-off.</voice>\n<voice>There's a warm intro from a VC partner connecting you with an engineering lead at a potential customer.</voice>\n<voice>And someone from a prospective client wants to confirm your API tier before your call this afternoon.</voice>\n<voice>I've drafted replies for three of them — the metrics update, the intro, and the API question.</voice>\n<voice>The only one I left for you is Taylor's contract redline, since that needs your judgment on the liability cap.</voice>\n\nExample 3 — User asks: "what's on my calendar today?"\n\n<voice>You've got a packed day — seven meetings starting with standup at 9.</voice>\n<voice>The highlights are your investor call at 11, lunch with a VC partner at 12:30, and a customer call at 4.</voice>\n<voice>Your only open block for deep work is 2:30 to 4, so plan accordingly.</voice>\n<voice>Oh, and your 1-on-1 with your co-founder is at 5:30 — that's a walking meeting.</voice>\n\nExample 4 — User asks: "how are our metrics looking?"\n\n<voice>Metrics are looking strong this week.</voice>\n<voice>You hit 2,573 weekly active users, which is up 12% week over week.</voice>\n<voice>That means you've crossed the 2,500 milestone — worth calling out in your next investor update.</voice>\n<voice>Churn is down to 4.1%, improving month over month.</voice>\n<voice>The trailing 8-week compound growth rate is about 10%.</voice>\n\nREMEMBER: Start with <voice> immediately. No preamble, no markdown before it. Speak first.`;
         }
         if (searchEnabled) {
-            loopLogger.log('search enabled, injecting search prompt');
+            loopLogger.debug('search enabled, injecting search prompt');
             instructionsWithDateTime += `\n\n# Search\nThe user has requested a search. Use the web-search tool to answer their query.`;
         }
         if (codeMode) {
-            loopLogger.log('code mode enabled, injecting coding-agent context', codeMode);
+            loopLogger.debug('code mode enabled, injecting coding-agent context', codeMode);
             const agentDisplay = codeMode === 'claude' ? 'Claude Code' : 'Codex';
             const otherAgent = codeMode === 'claude' ? 'codex' : 'claude';
             const otherDisplay = codeMode === 'claude' ? 'Codex' : 'Claude Code';
@@ -1481,7 +1481,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                 if (part.type === "tool-call") {
                     const underlyingTool = agent.tools![part.toolName];
                     if (underlyingTool.type === "builtin" && underlyingTool.name === "ask-human") {
-                        loopLogger.log('emitting ask-human-request, toolCallId:', part.toolCallId);
+                        loopLogger.debug('emitting ask-human-request, toolCallId:', part.toolCallId);
                         const rawOptions = (part.arguments as { options?: unknown }).options;
                         const options = Array.isArray(rawOptions)
                             ? rawOptions.filter((o): o is string => typeof o === 'string' && o.trim().length > 0)
@@ -1502,7 +1502,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                         state.sessionAllowedFileAccess,
                     );
                     if (permission) {
-                        loopLogger.log('emitting tool-permission-request, toolCallId:', part.toolCallId);
+                        loopLogger.debug('emitting tool-permission-request, toolCallId:', part.toolCallId);
                         yield* processEvent({
                             runId,
                             type: "tool-permission-request",
@@ -1512,7 +1512,7 @@ If the user's message is clearly NOT a coding request (small talk, an unrelated 
                         });
                     }
                     if (underlyingTool.type === "agent" && underlyingTool.name) {
-                        loopLogger.log('emitting spawn-subflow, toolCallId:', part.toolCallId);
+                        loopLogger.debug('emitting spawn-subflow, toolCallId:', part.toolCallId);
                         yield* processEvent({
                             runId,
                             type: "spawn-subflow",
@@ -1554,7 +1554,7 @@ async function* streamLlm(
     analytics?: StreamLlmAnalytics,
 ): AsyncGenerator<z.infer<typeof LlmStepStreamEvent>, void, unknown> {
     const converted = convertFromMessages(messages);
-    console.log(`! SENDING payload to model: `, JSON.stringify(converted))
+    rootLogger.debug(`SENDING payload to model: `, JSON.stringify(converted))
     const streamResult = analytics
         ? withUseCase({
             useCase: analytics.useCase,
@@ -1567,6 +1567,7 @@ async function* streamLlm(
             tools,
             stopWhen: stepCountIs(1),
             abortSignal: signal,
+            onError: ({ error }) => rootLogger.error('Stream error:', error),
         }))
         : streamText({
             model,
@@ -1575,12 +1576,13 @@ async function* streamLlm(
             tools,
             stopWhen: stepCountIs(1),
             abortSignal: signal,
+            onError: ({ error }) => rootLogger.error('Stream error:', error),
         });
     const { fullStream } = streamResult;
     for await (const event of fullStream) {
         // Check abort on every chunk for responsiveness
         signal?.throwIfAborted();
-        console.log("-> \t\tstream event", JSON.stringify(event));
+        rootLogger.debug("stream event", JSON.stringify(event));
         switch (event.type) {
             case "error":
                 yield {
@@ -1654,7 +1656,7 @@ async function* streamLlm(
                 };
                 break;
             default:
-                console.log('unknown stream event:', JSON.stringify(event));
+                rootLogger.debug('unknown stream event:', JSON.stringify(event));
                 continue;
         }
     }

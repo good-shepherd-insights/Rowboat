@@ -5,6 +5,10 @@ import { WorkDir } from '../config/config.js';
 import { WorkspaceChangeEvent } from 'packages/shared/dist/workspace.js';
 import z from 'zod';
 import { Stats } from 'node:fs';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('WorkspaceWatcher');
+
 
 export type WorkspaceChangeCallback = (event: z.infer<typeof WorkspaceChangeEvent>) => void;
 
@@ -69,7 +73,7 @@ export async function createWorkspaceWatcher(
       }
     })
     .on('error', (error: unknown) => {
-      console.error('Workspace watcher error:', error);
+      log.error('Workspace watcher error:', error);
     });
 
   return watcher;

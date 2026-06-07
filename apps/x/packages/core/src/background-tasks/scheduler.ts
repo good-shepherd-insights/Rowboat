@@ -1,9 +1,9 @@
-import { PrefixLogger } from '@x/shared';
+import { rootLogger } from '@x/shared';
 import { listTasks } from './fileops.js';
 import { runBackgroundTask } from './runner.js';
 import { backoffRemainingMs, dueTimedTrigger } from '../schedule/utils.js';
 
-const log = new PrefixLogger('BgTask:Scheduler');
+const log = rootLogger.child('BgTask:Scheduler');
 const POLL_INTERVAL_MS = 15_000; // 15 seconds — matches live-note scheduler
 
 function humanMs(ms: number): string {
@@ -55,14 +55,14 @@ async function processScheduledTasks(): Promise<void> {
         const backoffMs = backoffRemainingMs(attemptAt ?? null);
         if (backoffMs > 0) {
             backoffCount++;
-            log.log(`${task.slug} — skip (matched ${source}, backoff ${humanMs(backoffMs)} remaining)`);
+            log.debug(`${task.slug} — skip (matched ${source}, backoff ${humanMs(backoffMs)} remaining)`);
             continue;
         }
 
         firedCount++;
         log.log(`${task.slug} — firing (matched ${source})`);
         runBackgroundTask(task.slug, source).catch(err => {
-            log.log(`${task.slug} — fire error: ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`${task.slug} — fire error: ${err instanceof Error ? err.message : String(err)}`);
         });
     }
 
@@ -87,7 +87,7 @@ export async function init(): Promise<void> {
         try {
             await processScheduledTasks();
         } catch (err) {
-            log.log(`tick error: ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`tick error: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 }

@@ -7,6 +7,10 @@ import { composioAccountsRepo } from '../composio/repo.js';
 import { deleteConnectedAccount } from '../composio/client.js';
 import container from '../di/container.js';
 import { IOAuthRepo } from '../auth/repo.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('composio-google-migration');
+
 
 /**
  * One-time migration that moves Composio-connected Gmail/Calendar users
@@ -34,7 +38,7 @@ function loadState(): State {
             return ZState.parse(JSON.parse(raw));
         }
     } catch (error) {
-        console.error('[composio-google-migration] failed to load state:', error);
+        log.error('failed to load state:', error);
     }
     return {};
 }
@@ -56,16 +60,16 @@ async function disconnectComposioGoogle(): Promise<void> {
 
         try {
             await deleteConnectedAccount(account.id);
-            console.log(`[composio-google-migration] composio: deleted ${slug} (${account.id})`);
+            log.debug(`composio: deleted ${slug} (${account.id})`);
         } catch (error) {
             // Best-effort — logged but doesn't block the local cleanup.
-            console.warn(`[composio-google-migration] composio delete failed for ${slug}:`, error);
+            log.warn(`composio delete failed for ${slug}:`, error);
         }
 
         try {
             composioAccountsRepo.deleteAccount(slug);
         } catch (error) {
-            console.warn(`[composio-google-migration] local delete failed for ${slug}:`, error);
+            log.warn(`local delete failed for ${slug}:`, error);
         }
     }
 }
@@ -75,10 +79,10 @@ function cleanupCalendarComposioState(): void {
     try {
         if (fs.existsSync(file)) {
             fs.unlinkSync(file);
-            console.log('[composio-google-migration] removed stale calendar composio_state.json');
+            log.debug('removed stale calendar composio_state.json');
         }
     } catch (error) {
-        console.warn('[composio-google-migration] failed to remove composio_state.json:', error);
+        log.warn('failed to remove composio_state.json:', error);
     }
 }
 

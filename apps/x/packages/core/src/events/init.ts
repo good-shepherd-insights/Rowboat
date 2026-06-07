@@ -1,4 +1,4 @@
-import { PrefixLogger } from '@x/shared';
+import { rootLogger } from '@x/shared';
 import { processPendingEvents } from './processor.js';
 import { ensureEventDirs } from './producer.js';
 
@@ -8,7 +8,7 @@ export { routeBatch } from './routing.js';
 export type { RouteBatchOptions } from './routing.js';
 export { createEvent } from './producer.js';
 
-const log = new PrefixLogger('Events:Processor');
+const log = rootLogger.child('Events:Processor');
 const POLL_INTERVAL_MS = 5_000; // 5 seconds — events should feel responsive
 
 /**
@@ -26,7 +26,7 @@ export async function init(): Promise<void> {
         try {
             await processPendingEvents();
         } catch (err) {
-            log.log(`tick error: ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`tick error: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 }

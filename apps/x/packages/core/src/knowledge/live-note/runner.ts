@@ -5,9 +5,9 @@ import { getLiveNoteAgentModel } from '../../models/defaults.js';
 import { extractAgentResponse, waitForRunCompletion } from '../../agents/utils.js';
 import { buildTriggerBlock } from '../../agents/build-trigger-block.js';
 import { liveNoteBus } from './bus.js';
-import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
+import { rootLogger } from '@x/shared/dist/logger.js';
 
-const log = new PrefixLogger('LiveNote:Agent');
+const log = rootLogger.child('LiveNote:Agent');
 
 export interface LiveNoteAgentResult {
     filePath: string;
@@ -94,7 +94,7 @@ export async function runLiveNoteAgent(
     context?: string,
 ): Promise<LiveNoteAgentResult> {
     if (runningLiveNotes.has(filePath)) {
-        log.log(`${filePath} — skip: already running`);
+        log.warn(`${filePath} — skip: already running`);
         return { filePath, runId: null, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Already running' };
     }
     runningLiveNotes.add(filePath);
@@ -102,7 +102,7 @@ export async function runLiveNoteAgent(
     try {
         const live = await fetchLiveNote(filePath);
         if (!live) {
-            log.log(`${filePath} — skip: note is not live (no \`live:\` block)`);
+            log.warn(`${filePath} — skip: note is not live (no \`live:\` block)`);
             return { filePath, runId: null, action: 'no_update', contentBefore: null, contentAfter: null, summary: null, error: 'Note is not live' };
         }
 
@@ -190,7 +190,7 @@ export async function runLiveNoteAgent(
                 // Don't mask the original error if the patch itself fails.
             }
 
-            log.log(`${filePath} — failed: ${truncate(msg)}`);
+            log.error(`${filePath} — failed: ${truncate(msg)}`);
 
             await liveNoteBus.publish({
                 type: 'live_note_agent_complete',

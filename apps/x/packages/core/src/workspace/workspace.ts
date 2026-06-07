@@ -1,13 +1,16 @@
 import fs from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
-import { workspace } from '@x/shared';
+import { rootLogger,  workspace } from '@x/shared';
 import { z } from 'zod';
 import { RemoveOptions, WriteFileOptions, WriteFileResult } from 'packages/shared/dist/workspace.js';
 import { WorkDir } from '../config/config.js';
 import { rewriteWikiLinksForRenamedKnowledgeFile } from './wiki-link-rewrite.js';
 import { commitAll } from '../knowledge/version_history.js';
 import { withFileLock } from '../knowledge/file-lock.js';
+
+const log = rootLogger.child('VersionHistory');
+
 
 // ============================================================================
 // Path Utilities
@@ -230,7 +233,7 @@ function scheduleKnowledgeCommit(filename: string): void {
   knowledgeCommitTimer = setTimeout(() => {
     knowledgeCommitTimer = null;
     commitAll(`Edit ${filename}`, 'You').catch(err => {
-      console.error('[VersionHistory] Failed to commit after edit:', err);
+      log.error('Failed to commit after edit:', err);
     });
   }, 3 * 60 * 1000);
 }
@@ -351,7 +354,7 @@ export async function rename(
     try {
       await rewriteWikiLinksForRenamedKnowledgeFile(WorkDir, from, to);
     } catch (error) {
-      console.error('Failed to rewrite wiki backlinks after file rename:', error);
+      log.error('Failed to rewrite wiki backlinks after file rename:', error);
     }
   }
 

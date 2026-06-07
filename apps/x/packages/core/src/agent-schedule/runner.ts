@@ -10,6 +10,10 @@ import { AgentScheduleState, AgentScheduleStateEntry } from "@x/shared/dist/agen
 import { MessageEvent } from "@x/shared/dist/runs.js";
 import { createRun } from "../runs/runs.js";
 import z from "zod";
+import { rootLogger } from '@x/shared/dist/logger.js';
+
+const log = rootLogger.child('AgentRunner');
+
 
 const DEFAULT_STARTING_MESSAGE = "go";
 
@@ -30,7 +34,7 @@ let wakeResolve: (() => void) | null = null;
 
 export function triggerRun(): void {
     if (wakeResolve) {
-        console.log("[AgentRunner] Triggered - waking up immediately");
+        log.debug("Triggered - waking up immediately");
         wakeResolve();
         wakeResolve = null;
     }
@@ -66,7 +70,7 @@ function calculateNextRunAt(
                 });
                 return toLocalISOString(interval.next().toDate());
             } catch (error) {
-                console.error("[AgentRunner] Invalid cron expression:", schedule.expression, error);
+                log.error("Invalid cron expression:", schedule.expression, error);
                 return null;
             }
         }
@@ -90,7 +94,7 @@ function calculateNextRunAt(
                 nextDate.setHours(Math.floor(randomMinutes / 60), randomMinutes % 60, 0, 0);
                 return toLocalISOString(nextDate);
             } catch (error) {
-                console.error("[AgentRunner] Invalid window schedule:", error);
+                log.error("Invalid window schedule:", error);
                 return null;
             }
         }
@@ -152,7 +156,7 @@ async function runAgent(
     agentRuntime: IAgentRuntime,
     idGenerator: IMonotonicallyIncreasingIdGenerator
 ): Promise<void> {
-    console.log(`[AgentRunner] Starting agent: ${agentName}`);
+    log.debug(`Starting agent: ${agentName}`);
 
     const startedAt = toLocalISOString(new Date());
 
@@ -169,7 +173,7 @@ async function runAgent(
             useCase: 'copilot_chat',
             subUseCase: 'scheduled',
         });
-        console.log(`[AgentRunner] Created run ${run.id} for agent ${agentName}`);
+        log.debug(`Created run ${run.id} for agent ${agentName}`);
 
         // Add the starting message as a user message
         const startingMessage = entry.startingMessage ?? DEFAULT_STARTING_MESSAGE;
@@ -184,7 +188,7 @@ async function runAgent(
             subflow: [],
         };
         await runsRepo.appendEvents(run.id, [messageEvent]);
-        console.log(`[AgentRunner] Sent starting message to agent ${agentName}: "${startingMessage}"`);
+        log.debug(`Sent starting message to agent ${agentName}: "${startingMessage}"`);
 
         // Trigger the run
         await agentRuntime.trigger(run.id);
@@ -203,9 +207,9 @@ async function runAgent(
             runCount: (currentState?.runCount ?? 0) + 1,
         });
 
-        console.log(`[AgentRunner] Finished agent: ${agentName}`);
+        log.debug(`Finished agent: ${agentName}`);
     } catch (error) {
-        console.error(`[AgentRunner] Error running agent ${agentName}:`, error);
+        log.error(`Error running agent ${agentName}:`, error);
 
         // Calculate next run time even on failure (for retry)
         const nextRunAt = calculateNextRunAt(entry.schedule);
@@ -239,7 +243,7 @@ async function checkForTimeouts(
             const elapsed = now.getTime() - startedAt.getTime();
 
             if (elapsed > TIMEOUT_MS) {
-                console.log(`[AgentRunner] Agent ${agentName} timed out after ${Math.round(elapsed / 1000 / 60)} minutes`);
+                log.debug(`Agent ${agentName} timed out after ${Math.round(elapsed / 1000 / 60)} minutes`);
 
                 // Get schedule entry for calculating next run
                 const entry = config.agents[agentName];
@@ -276,7 +280,7 @@ async function pollAndRun(): Promise<void> {
         config = await scheduleRepo.getConfig();
         state = await stateRepo.getState();
     } catch (error) {
-        console.error("[AgentRunner] Error loading config/state:", error);
+        log.error("Error loading config/state:", error);
         return;
     }
 
@@ -287,7 +291,7 @@ async function pollAndRun(): Promise<void> {
     try {
         state = await stateRepo.getState();
     } catch (error) {
-        console.error("[AgentRunner] Error reloading state:", error);
+        log.error("Error reloading state:", error);
         return;
     }
 
@@ -307,7 +311,7 @@ async function pollAndRun(): Promise<void> {
                     lastError: null,
                     runCount: 0,
                 });
-                console.log(`[AgentRunner] Initialized state for ${agentName}, next run at ${nextRunAt}`);
+                log.debug(`Initialized state for ${agentName}, next run at ${nextRunAt}`);
             }
             continue; // Don't run immediately on first initialization
         }
@@ -315,7 +319,7 @@ async function pollAndRun(): Promise<void> {
         if (shouldRunNow(entry, agentState)) {
             // Run agent (don't await - let it run in background)
             runAgent(agentName, entry, stateRepo, runsRepo, agentRuntime, idGenerator).catch((error) => {
-                console.error(`[AgentRunner] Unhandled error in runAgent for ${agentName}:`, error);
+                log.error(`Unhandled error in runAgent for ${agentName}:`, error);
             });
         }
     }
@@ -326,13 +330,13 @@ async function pollAndRun(): Promise<void> {
  * Polls every minute to check for agents that need to run.
  */
 export async function init(): Promise<void> {
-    console.log("[AgentRunner] Starting background agent runner service");
+    log.debug("Starting background agent runner service");
 
     while (true) {
         try {
             await pollAndRun();
         } catch (error) {
-            console.error("[AgentRunner] Error in main loop:", error);
+            log.error("Error in main loop:", error);
         }
 
         await interruptibleSleep(POLL_INTERVAL_MS);

@@ -1,5 +1,9 @@
 import * as client from 'openid-client';
 import { OAuthTokens, ClientRegistrationResponse } from './types.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('OAuth');
+
 
 /**
  * Cached configurations per provider (issuer:clientId -> Configuration)
@@ -44,10 +48,10 @@ export async function discoverConfiguration(
 
   const cached = configCache.get(cacheKey);
   if (cached) {
-    console.log(`[OAuth] Using cached configuration for ${issuerUrl}`);
+    log.debug(`Using cached configuration for ${issuerUrl}`);
     return cached;
   }
-  console.log(`[OAuth] Discovering authorization server metadata for ${issuerUrl}...`);
+  log.debug(`Discovering authorization server metadata for ${issuerUrl}...`);
   const config = await client.discovery(
     new URL(issuerUrl),
     clientId,
@@ -59,7 +63,7 @@ export async function discoverConfiguration(
   );
 
   configCache.set(cacheKey, config);
-  console.log(`[OAuth] Discovery complete for ${issuerUrl}`);
+  log.debug(`Discovery complete for ${issuerUrl}`);
   return config;
 }
 
@@ -73,7 +77,7 @@ export function createStaticConfiguration(
   revocationEndpoint?: string,
   clientSecret?: string
 ): client.Configuration {
-  console.log(`[OAuth] Creating static configuration (no discovery)`);
+  log.debug(`Creating static configuration (no discovery)`);
 
   const issuer = new URL(authorizationEndpoint).origin;
 
@@ -103,7 +107,7 @@ export async function registerClient(
   scopes: string[],
   clientName: string = 'RowboatX Desktop App'
 ): Promise<{ config: client.Configuration; registration: ClientRegistrationResponse }> {
-  console.log(`[OAuth] Registering client via DCR at ${issuerUrl}...`);
+  log.debug(`Registering client via DCR at ${issuerUrl}...`);
   const config = await client.dynamicClientRegistration(
     new URL(issuerUrl),
     {
@@ -121,7 +125,7 @@ export async function registerClient(
   );
 
   const metadata = config.clientMetadata();
-  console.log(`[OAuth] DCR complete, client_id: ${metadata.client_id}`);
+  log.debug(`DCR complete, client_id: ${metadata.client_id}`);
 
   // Extract registration response for persistence
   const registration = ClientRegistrationResponse.parse({
@@ -176,14 +180,14 @@ export async function exchangeCodeForTokens(
   codeVerifier: string,
   expectedState: string
 ): Promise<OAuthTokens> {
-  console.log(`[OAuth] Exchanging authorization code for tokens...`);
+  log.debug(`Exchanging authorization code for tokens...`);
 
   const response = await client.authorizationCodeGrant(config, callbackUrl, {
     pkceCodeVerifier: codeVerifier,
     expectedState,
   });
 
-  console.log(`[OAuth] Token exchange successful`);
+  log.debug(`Token exchange successful`);
   return toOAuthTokens(response);
 }
 
@@ -196,7 +200,7 @@ export async function refreshTokens(
   refreshToken: string,
   existingScopes?: string[]
 ): Promise<OAuthTokens> {
-  console.log(`[OAuth] Refreshing access token...`);
+  log.debug(`Refreshing access token...`);
 
   const response = await client.refreshTokenGrant(config, refreshToken);
 
@@ -212,7 +216,7 @@ export async function refreshTokens(
     tokens.refresh_token = refreshToken;
   }
 
-  console.log(`[OAuth] Token refresh successful`);
+  log.debug(`Token refresh successful`);
   return tokens;
 }
 
@@ -233,10 +237,10 @@ export function isTokenExpired(tokens: OAuthTokens): boolean {
 export function clearConfigCache(issuerUrl?: string, clientId?: string): void {
   if (issuerUrl && clientId) {
     configCache.delete(`${issuerUrl}:${clientId}`);
-    console.log(`[OAuth] Cleared configuration cache for ${issuerUrl}`);
+    log.debug(`Cleared configuration cache for ${issuerUrl}`);
   } else {
     configCache.clear();
-    console.log(`[OAuth] Cleared all configuration cache`);
+    log.debug(`Cleared all configuration cache`);
   }
 }
 

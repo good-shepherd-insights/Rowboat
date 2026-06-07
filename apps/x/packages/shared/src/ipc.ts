@@ -312,7 +312,7 @@ const ipcSchemas = {
   'services:getLogLevel': {
     req: z.null(),
     res: z.object({
-      level: z.enum(['info', 'warn', 'error']),
+      level: z.enum(['debug', 'info', 'warn', 'error', 'silent']),
     }),
   },
   'live-note-agent:events': {

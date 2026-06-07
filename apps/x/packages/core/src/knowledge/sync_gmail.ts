@@ -9,6 +9,12 @@ import { serviceLogger, type ServiceRunContext } from '../services/service_logge
 import { limitEventItems } from './limit_event_items.js';
 import { createEvent } from '../events/producer.js';
 import { classifyThread, getUserEmail } from './classify_thread.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Gmail');
+const cacheLog = rootLogger.child('Gmail cache');
+const inboxLog = rootLogger.child('Inbox lists');
+
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'gmail_sync');
@@ -19,10 +25,10 @@ const CACHE_DIR = path.join(WorkDir, 'inbox_lists');
     try {
         if (fs.existsSync(LEGACY_CACHE_DIR) && !fs.existsSync(CACHE_DIR)) {
             fs.renameSync(LEGACY_CACHE_DIR, CACHE_DIR);
-            console.log(`[Gmail] Migrated cache from ${LEGACY_CACHE_DIR} → ${CACHE_DIR}`);
+            log.debug(`Migrated cache from ${LEGACY_CACHE_DIR} → ${CACHE_DIR}`);
         }
     } catch (err) {
-        console.warn('[Gmail] Cache directory migration failed:', err);
+        log.warn('Cache directory migration failed:', err);
     }
 })();
 const SYNC_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
@@ -68,7 +74,7 @@ function writeCachedSnapshot(threadId: string, historyId: string, snapshot: Gmai
         };
         fs.writeFileSync(cachePath(threadId), JSON.stringify(entry), 'utf-8');
     } catch (err) {
-        console.warn(`[Gmail cache] write failed for ${threadId}:`, err);
+        cacheLog.warn(`write failed for ${threadId}:`, err);
     }
 }
 
@@ -82,7 +88,7 @@ export function saveMessageBodyHeight(threadId: string, messageId: string, heigh
     try {
         fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
     } catch (err) {
-        console.warn(`[Gmail cache] height write failed for ${threadId}/${messageId}:`, err);
+        cacheLog.warn(`height write failed for ${threadId}/${messageId}:`, err);
     }
 }
 
@@ -90,7 +96,7 @@ function deleteCachedSnapshot(threadId: string): void {
     try {
         fs.rmSync(cachePath(threadId), { force: true });
     } catch (err) {
-        console.warn(`[Gmail cache] delete failed for ${threadId}:`, err);
+        cacheLog.warn(`delete failed for ${threadId}:`, err);
     }
 }
 
@@ -147,7 +153,7 @@ export async function markThreadRead(threadId: string): Promise<ThreadActionResu
             try {
                 fs.writeFileSync(cachePath(threadId), JSON.stringify(cached), 'utf-8');
             } catch (err) {
-                console.warn(`[Gmail cache] markRead write failed for ${threadId}:`, err);
+                cacheLog.warn(`markRead write failed for ${threadId}:`, err);
             }
         }
         return { ok: true };
@@ -230,7 +236,7 @@ async function publishGmailSyncEvent(threads: SyncedThread[]): Promise<void> {
             payload: summarizeGmailSync(threads),
         });
     } catch (err) {
-        console.error('[Gmail] Failed to publish sync event:', err);
+        log.error('Failed to publish sync event:', err);
     }
 }
 
@@ -239,7 +245,7 @@ let wakeResolve: (() => void) | null = null;
 
 export function triggerSync(): void {
     if (wakeResolve) {
-        console.log('[Gmail] Triggered - waking up immediately');
+        log.debug('Triggered - waking up immediately');
         wakeResolve();
         wakeResolve = null;
     }
@@ -389,7 +395,7 @@ async function inlineCidImages(
             const normalized = b64.replace(/-/g, '+').replace(/_/g, '/');
             dataUrls.set(part.contentId, `data:${part.mimeType};base64,${normalized}`);
         } catch (err) {
-            console.warn(`[Gmail] inline image fetch failed for ${part.contentId}:`, err);
+            log.warn(`inline image fetch failed for ${part.contentId}:`, err);
         }
     }));
 
@@ -603,7 +609,7 @@ export function listInboxPage(opts: InboxPageOptions): InboxPageResult {
                 snapshot,
             });
         } catch (err) {
-            console.warn(`[Inbox lists] read failed for ${name}:`, err);
+            inboxLog.warn(`read failed for ${name}:`, err);
         }
     }
 
@@ -717,7 +723,7 @@ async function buildAndCacheSnapshot(
             try {
                 bodyHtml = await inlineCidImages(gmailClient, msg.id, msg.payload, parts.html);
             } catch (err) {
-                console.warn(`[Gmail] inline image embed failed for message ${msg.id}:`, err);
+                log.warn(`inline image embed failed for message ${msg.id}:`, err);
                 bodyHtml = parts.html;
             }
         }
@@ -789,7 +795,7 @@ async function buildAndCacheSnapshot(
             if (draftResponse) snapshot.draft_response = draftResponse;
         }
     } catch (err) {
-        console.warn(`[Gmail] classify failed for ${threadId}:`, err);
+        log.warn(`classify failed for ${threadId}:`, err);
     }
 
     if (threadData.historyId) {
@@ -819,11 +825,11 @@ async function saveAttachment(gmail: gmail.Gmail, userId: string, msgId: string,
         const data = res.data.data;
         if (data) {
             fs.writeFileSync(filePath, Buffer.from(data, 'base64'));
-            console.log(`Saved attachment: ${safeName}`);
+            log.debug(`Saved attachment: ${safeName}`);
             return safeName;
         }
     } catch (e) {
-        console.error(`Error saving attachment ${filename}:`, e);
+        log.error(`Error saving attachment ${filename}:`, e);
     }
     return null;
 }
@@ -845,7 +851,7 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
             return labels.includes('SPAM') || labels.includes('TRASH');
         });
         if (isExcluded) {
-            console.log(`Skipping thread ${threadId} (SPAM/TRASH)`);
+            log.debug(`Skipping thread ${threadId} (SPAM/TRASH)`);
             return null;
         }
 
@@ -898,20 +904,20 @@ async function processThread(auth: OAuth2Client, threadId: string, syncDir: stri
         }
 
         fs.writeFileSync(path.join(syncDir, `${threadId}.md`), mdContent);
-        console.log(`Synced Thread: ${subject} (${threadId})`);
+        log.debug(`Synced Thread: ${subject} (${threadId})`);
 
         // Also build + cache the rich snapshot for the inbox view.
         // Reuses the threads.get response — no extra API call.
         try {
             await buildAndCacheSnapshot(threadId, thread, gmail, auth);
         } catch (err) {
-            console.warn(`[Gmail] Inbox snapshot build failed for ${threadId}:`, err);
+            log.warn(`Inbox snapshot build failed for ${threadId}:`, err);
         }
 
         return { threadId, markdown: mdContent };
 
     } catch (error) {
-        console.error(`Error processing thread ${threadId}:`, error);
+        log.error(`Error processing thread ${threadId}:`, error);
         const status = getErrorStatus(error);
         if (status === 404) return null;
         throw error;
@@ -949,12 +955,12 @@ async function pruneInboxCache(auth: OAuth2Client): Promise<void> {
                 try {
                     fs.rmSync(path.join(CACHE_DIR, name), { force: true });
                 } catch (err) {
-                    console.warn(`[Gmail] prune failed for ${threadId}:`, err);
+                    log.warn(`prune failed for ${threadId}:`, err);
                 }
             }
         }
     } catch (err) {
-        console.warn('[Gmail] pruneInboxCache failed:', err);
+        log.warn('pruneInboxCache failed:', err);
     }
 }
 
@@ -1049,7 +1055,7 @@ async function backfillMissingRecentThreads(
     saveState(profile.data.historyId!, stateFile, { last_recent_backfill: new Date().toISOString() });
 
     if (missingThreadIds.length > 0) {
-        console.log(`Recent Gmail backfill synced ${synced.length}/${missingThreadIds.length} missing thread(s).`);
+        log.debug(`Recent Gmail backfill synced ${synced.length}/${missingThreadIds.length} missing thread(s).`);
     }
     return synced;
 }
@@ -1071,10 +1077,10 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
     let pastDate: Date;
     if (state.last_sync && new Date(state.last_sync) > lookbackFloor) {
         pastDate = new Date(state.last_sync);
-        console.log(`Performing full sync from last_sync=${state.last_sync}...`);
+        log.debug(`Performing full sync from last_sync=${state.last_sync}...`);
     } else {
         pastDate = lookbackFloor;
-        console.log(`Performing full sync of last ${lookbackDays} days...`);
+        log.debug(`Performing full sync of last ${lookbackDays} days...`);
     }
 
     let run: ServiceRunContext | null = null;
@@ -1118,7 +1124,7 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
 
         if (threadIds.length === 0) {
             saveState(currentHistoryId, stateFile);
-            console.log("Full sync complete. No threads found.");
+            log.debug("Full sync complete. No threads found.");
             return;
         }
 
@@ -1154,9 +1160,9 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
             outcome: 'ok',
             summary: { threads: threadIds.length },
         });
-        console.log("Full sync complete.");
+        log.debug("Full sync complete.");
     } catch (error) {
-        console.error("Error during full sync:", error);
+        log.error("Error during full sync:", error);
         await ensureRun();
         await serviceLogger.log({
             type: 'error',
@@ -1180,7 +1186,7 @@ async function fullSync(auth: OAuth2Client, syncDir: string, attachmentsDir: str
 }
 
 async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: string, attachmentsDir: string, stateFile: string, lookbackDays: number) {
-    console.log(`Checking updates since historyId ${startHistoryId}...`);
+    log.debug(`Checking updates since historyId ${startHistoryId}...`);
     const gmail = google.gmail({ version: 'v1', auth });
 
     let run: ServiceRunContext | null = null;
@@ -1210,7 +1216,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
         } while (pageToken);
 
         if (!changes || changes.length === 0) {
-            console.log("No new changes.");
+            log.debug("No new changes.");
             const backfilled = await backfillMissingRecentThreads(auth, syncDir, attachmentsDir, stateFile, lookbackDays);
             await publishGmailSyncEvent(backfilled);
             const profile = await gmail.users.getProfile({ userId: 'me' });
@@ -1218,7 +1224,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
             return;
         }
 
-        console.log(`Found ${changes.length} history records.`);
+        log.debug(`Found ${changes.length} history records.`);
         const threadIds = new Set<string>();
 
         for (const record of changes) {
@@ -1281,12 +1287,12 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
     } catch (error: unknown) {
         const e = error as { response?: { status?: number } };
         if (e.response?.status === 404) {
-            console.log("History ID expired. Falling back to full sync.");
+            log.debug("History ID expired. Falling back to full sync.");
             await fullSync(auth, syncDir, attachmentsDir, stateFile, lookbackDays);
             return;
         }
 
-        console.error("Error during partial sync:", error);
+        log.error("Error during partial sync:", error);
         await ensureRun();
         await serviceLogger.log({
             type: 'error',
@@ -1307,7 +1313,7 @@ async function partialSync(auth: OAuth2Client, startHistoryId: string, syncDir: 
         });
         // If 401, clear tokens to force re-auth next run
         if (e.response?.status === 401) {
-            console.log("401 Unauthorized, clearing cache");
+            log.debug("401 Unauthorized, clearing cache");
             GoogleClientFactory.clearCache();
         }
     }
@@ -1325,11 +1331,11 @@ async function performSync() {
     try {
         const auth = await GoogleClientFactory.getClient();
         if (!auth) {
-            console.log("No valid OAuth credentials available.");
+            log.debug("No valid OAuth credentials available.");
             return;
         }
 
-        console.log("Authorization successful. Starting sync...");
+        log.debug("Authorization successful. Starting sync...");
 
         const state = loadState(STATE_FILE);
         // Backfill case: users who upgraded from a pre-inbox-view build have a
@@ -1347,16 +1353,16 @@ async function performSync() {
         const gapMs = state.last_sync ? Date.now() - new Date(state.last_sync).getTime() : 0;
         const gapTooLarge = gapMs > LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
         if (!state.historyId) {
-            console.log("No history ID found, starting full sync...");
+            log.debug("No history ID found, starting full sync...");
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else if (cacheMissing) {
-            console.log("History ID present but inbox cache empty — running full sync to backfill snapshots...");
+            log.debug("History ID present but inbox cache empty — running full sync to backfill snapshots...");
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else if (gapTooLarge) {
-            console.log(`Last sync older than ${LOOKBACK_DAYS} days — running full sync clamped to the lookback window instead of partial sync...`);
+            log.debug(`Last sync older than ${LOOKBACK_DAYS} days — running full sync clamped to the lookback window instead of partial sync...`);
             await fullSync(auth, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         } else {
-            console.log("History ID found, starting partial sync...");
+            log.debug("History ID found, starting partial sync...");
             await partialSync(auth, state.historyId, SYNC_DIR, ATTACHMENTS_DIR, STATE_FILE, LOOKBACK_DAYS);
         }
 
@@ -1364,9 +1370,9 @@ async function performSync() {
         // remove cache files for threads that were archived/trashed elsewhere.
         await pruneInboxCache(auth);
 
-        console.log("Sync completed.");
+        log.debug("Sync completed.");
     } catch (error) {
-        console.error("Error during sync:", error);
+        log.error("Error during sync:", error);
     }
 }
 
@@ -1517,7 +1523,7 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
                     )
                 );
             } catch (cleanupErr) {
-                console.warn('[Gmail] Draft cleanup after send failed:', cleanupErr);
+                log.warn('Draft cleanup after send failed:', cleanupErr);
             }
         }
 
@@ -1531,23 +1537,23 @@ export async function sendThreadReply(opts: SendReplyOptions): Promise<SendReply
 }
 
 export async function init() {
-    console.log("Starting Gmail Sync (TS)...");
-    console.log(`Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
+    log.debug("Starting Gmail Sync (TS)...");
+    log.debug(`Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
 
     while (true) {
         try {
             const hasCredentials = await GoogleClientFactory.hasValidCredentials(REQUIRED_SCOPE);
             if (!hasCredentials) {
-                console.log("Google OAuth credentials not available or missing required Gmail scope. Sleeping...");
+                log.debug("Google OAuth credentials not available or missing required Gmail scope. Sleeping...");
             } else {
                 await performSync();
             }
         } catch (error) {
-            console.error("Error in main loop:", error);
+            log.error("Error in main loop:", error);
         }
 
         // Sleep for N minutes before next check (can be interrupted by triggerSync)
-        console.log(`Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
+        log.debug(`Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
         await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }

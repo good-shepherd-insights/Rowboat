@@ -1,5 +1,5 @@
 import type { BackgroundTask, BackgroundTaskTriggerType } from '@x/shared/dist/background-task.js';
-import { PrefixLogger } from '@x/shared/dist/prefix-logger.js';
+import { rootLogger } from '@x/shared/dist/logger.js';
 import { fetchTask, patchTask, prependRunId } from './fileops.js';
 import { createRun, createMessage } from '../runs/runs.js';
 import { getBackgroundTaskAgentModel } from '../models/defaults.js';
@@ -7,7 +7,7 @@ import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
 import { buildTriggerBlock } from '../agents/build-trigger-block.js';
 import { backgroundTaskBus } from './bus.js';
 
-const log = new PrefixLogger('BgTask:Agent');
+const log = rootLogger.child('BgTask:Agent');
 
 export interface BackgroundTaskAgentResult {
     slug: string;
@@ -88,7 +88,7 @@ export async function runBackgroundTask(
     context?: string,
 ): Promise<BackgroundTaskAgentResult> {
     if (runningTasks.has(slug)) {
-        log.log(`${slug} — skip: already running`);
+        log.warn(`${slug} — skip: already running`);
         return { slug, runId: null, summary: null, error: 'Already running' };
     }
     runningTasks.add(slug);
@@ -96,7 +96,7 @@ export async function runBackgroundTask(
     try {
         const task = await fetchTask(slug);
         if (!task) {
-            log.log(`${slug} — skip: task not found`);
+            log.warn(`${slug} — skip: task not found`);
             return { slug, runId: null, summary: null, error: 'Task not found' };
         }
 
@@ -176,7 +176,7 @@ export async function runBackgroundTask(
                 // don't mask the original error
             }
 
-            log.log(`${slug} — failed: ${truncate(msg)}`);
+            log.error(`${slug} — failed: ${truncate(msg)}`);
 
             backgroundTaskBus.publish({
                 type: 'background_task_agent_complete',

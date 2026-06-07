@@ -2,7 +2,8 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import { WorkDir } from "../config/config.js";
-import { LOG_LEVEL } from "../config/env.js";
+import { LEVEL_ORDER, LIFECYCLE_EVENT_TYPES, type LogLevelValue } from "@x/shared/dist/log-level.js";
+import { rootLogger } from "@x/shared/dist/logger.js";
 import { IdGen } from "../application/lib/id-gen.js";
 import type { ServiceEventType } from "@x/shared/dist/service-events.js";
 import { serviceBus } from "./service_bus.js";
@@ -10,14 +11,6 @@ import { serviceBus } from "./service_bus.js";
 type ServiceNameType = ServiceEventType["service"];
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type ServiceEventInput = DistributiveOmit<ServiceEventType, "ts">;
-
-type LogLevelValue = "info" | "warn" | "error";
-
-const LEVEL_ORDER: Record<LogLevelValue, number> = {
-    error: 0,
-    warn: 1,
-    info: 2,
-};
 
 const LOG_DIR = path.join(WorkDir, "logs");
 const LOG_FILE = path.join(LOG_DIR, "services.jsonl");
@@ -33,31 +26,22 @@ function safeTimestampForFile(ts: string): string {
     return ts.replace(/[:.]/g, "-");
 }
 
-function resolveMinLevel(): LogLevelValue {
-    if (LOG_LEVEL in LEVEL_ORDER) return LOG_LEVEL as LogLevelValue;
-    return "info";
-}
-
 export class ServiceLogger {
     private idGen = new IdGen();
     private stream: fs.WriteStream | null = null;
     private currentSize = 0;
     private initialized = false;
-    private minLevel: LogLevelValue;
     private writeQueue: Promise<void> = Promise.resolve();
 
-    constructor() {
-        this.minLevel = resolveMinLevel();
-    }
-
     getLogLevel(): LogLevelValue {
-        return this.minLevel;
+        return rootLogger.getMinLevel();
     }
 
     private shouldEmit(event: ServiceEventInput): boolean {
-        if (this.minLevel === "info") return true;
-        if (event.type === "run_start" || event.type === "run_complete") return true;
-        return LEVEL_ORDER[event.level as LogLevelValue] <= LEVEL_ORDER[this.minLevel];
+        const minLevel = rootLogger.getMinLevel();
+        if (minLevel === "info") return true;
+        if (LIFECYCLE_EVENT_TYPES.has(event.type)) return true;
+        return LEVEL_ORDER[event.level as LogLevelValue] <= LEVEL_ORDER[minLevel];
     }
 
     private async ensureReady(): Promise<void> {

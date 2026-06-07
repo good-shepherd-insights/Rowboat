@@ -61,6 +61,7 @@ import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "@/lib/toast"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
+import { LEVEL_ORDER, LIFECYCLE_EVENT_TYPES, type LogLevelValue } from "@x/shared/src/log-level.js"
 import z from "zod"
 
 interface TreeNode {
@@ -162,15 +163,9 @@ function collectServiceErrors(events: ServiceEventType[]): Map<string, string> {
   return errors
 }
 
-const LEVEL_ORDER: Record<string, number> = {
-  error: 0,
-  warn: 1,
-  info: 2,
-}
-
-function shouldShowEvent(event: ServiceEventType, level: 'info' | 'warn' | 'error'): boolean {
+function shouldShowEvent(event: ServiceEventType, level: LogLevelValue): boolean {
   if (level === 'info') return true
-  if (event.type === 'run_start' || event.type === 'run_complete') return true
+  if (LIFECYCLE_EVENT_TYPES.has(event.type)) return true
   return LEVEL_ORDER[event.level] <= LEVEL_ORDER[level]
 }
 
@@ -207,7 +202,7 @@ function SyncStatusBar() {
   const { state } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
   const [serviceErrors, setServiceErrors] = useState<Map<string, string>>(new Map())
-  const [logLevel, setLogLevel] = useState<'info' | 'warn' | 'error'>('info')
+  const [logLevel, setLogLevel] = useState<LogLevelValue>('info')
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
   const [logLoading, setLogLoading] = useState(false)

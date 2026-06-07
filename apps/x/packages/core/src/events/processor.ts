@@ -1,11 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import { events, PrefixLogger } from '@x/shared';
+import { events, rootLogger } from '@x/shared';
 import type { RowboatEvent, ConsumerResult } from '@x/shared/dist/events.js';
 import type { EventConsumer } from './consumer.js';
 import { PENDING_DIR, DONE_DIR, ensureEventDirs } from './producer.js';
 
-const log = new PrefixLogger('Events:Processor');
+const log = rootLogger.child('Events:Processor');
 
 let registeredConsumers: EventConsumer[] = [];
 
@@ -26,7 +26,7 @@ function moveEventToDone(filename: string, enriched: RowboatEvent): void {
     try {
         fs.unlinkSync(pendingPath);
     } catch (err) {
-        log.log(`failed to remove pending event ${filename}: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`failed to remove pending event ${filename}: ${err instanceof Error ? err.message : String(err)}`);
     }
 }
 
@@ -51,7 +51,7 @@ async function processOneEvent(filename: string): Promise<void> {
         event = migrateLegacyTarget(event);
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        log.log(`event:${filename} — malformed, moving to done with error: ${msg}`);
+        log.error(`event:${filename} — malformed, moving to done with error: ${msg}`);
         const stub: RowboatEvent = {
             id: filename.replace(/\.json$/, ''),
             source: 'unknown',
@@ -87,7 +87,7 @@ async function processOneEvent(filename: string): Promise<void> {
             return { consumer, candidateIds, error: undefined as string | undefined };
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            log.log(`event:${event.id} — consumer ${consumer.name} Pass-1 threw: ${msg}`);
+            log.error(`event:${event.id} — consumer ${consumer.name} Pass-1 threw: ${msg}`);
             return { consumer, candidateIds: [], error: msg };
         }
     }));
@@ -106,7 +106,7 @@ async function processOneEvent(filename: string): Promise<void> {
                 }
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                log.log(`event:${event.id} — consumer ${consumer.name} candidate ${id} threw: ${msg}`);
+                log.error(`event:${event.id} — consumer ${consumer.name} candidate ${id} threw: ${msg}`);
                 result.errors!.push(`${id}: ${msg}`);
             }
         }
@@ -146,7 +146,7 @@ export async function processPendingEvents(): Promise<void> {
     try {
         filenames = fs.readdirSync(PENDING_DIR).filter(f => f.endsWith('.json'));
     } catch (err) {
-        log.log(`failed to read pending dir: ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`failed to read pending dir: ${err instanceof Error ? err.message : String(err)}`);
         return;
     }
 
@@ -163,7 +163,7 @@ export async function processPendingEvents(): Promise<void> {
         try {
             await processOneEvent(filename);
         } catch (err) {
-            log.log(`event:${filename} — unhandled error: ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`event:${filename} — unhandled error: ${err instanceof Error ? err.message : String(err)}`);
             // Keep the loop alive — don't move file, will retry on next tick
         }
     }

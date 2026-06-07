@@ -2,6 +2,10 @@ import path from "path";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import { WorkDir } from "./config.js";
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Security');
+
 
 export const SECURITY_CONFIG_PATH = path.join(WorkDir, "config", "security.json");
 
@@ -213,7 +217,7 @@ function readSecurityConfig(): { allowedCommands: string[]; allowedFileAccess: F
         const parsed = JSON.parse(configContent);
         return parseSecurityPayload(parsed);
     } catch (error) {
-        console.warn(`Failed to read security config at ${SECURITY_CONFIG_PATH}: ${error instanceof Error ? error.message : error}`);
+        log.warn(`Failed to read security config at ${SECURITY_CONFIG_PATH}: ${error instanceof Error ? error.message : error}`);
         return { allowedCommands: DEFAULT_ALLOW_LIST, allowedFileAccess: [] };
     }
 }

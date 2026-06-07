@@ -1,5 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('WikiLinkRewrite');
+
 
 const WIKI_LINK_REGEX = /\[\[([^[\]]+)\]\]/g;
 const KNOWLEDGE_PREFIX = 'knowledge/';
@@ -162,7 +166,7 @@ export async function rewriteWikiLinksForRenamedKnowledgeFile(
       await fs.writeFile(absolutePath, rewritten, 'utf8');
       rewrittenFiles += 1;
     } catch (error) {
-      console.error('Failed to rewrite wiki links in file:', relativePath, error);
+      log.error('Failed to rewrite wiki links in file:', relativePath, error);
     }
   }
 

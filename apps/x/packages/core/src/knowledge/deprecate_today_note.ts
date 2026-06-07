@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { LiveNoteSchema } from '@x/shared/dist/live-note.js';
 import { WorkDir } from '../config/config.js';
 import { splitFrontmatter, joinFrontmatter } from '../application/lib/parse-frontmatter.js';
+import { rootLogger } from '@x/shared/dist/logger.js';
+
+const log = rootLogger.child('TodayNoteDeprecation');
+
 
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 const TODAY_NOTE_PATH = path.join(KNOWLEDGE_DIR, 'Today.md');
@@ -38,7 +42,7 @@ async function loadState(): Promise<State> {
         const raw = await fs.readFile(STATE_FILE, 'utf-8');
         return StateSchema.parse(JSON.parse(raw));
     } catch (error) {
-        console.warn('[TodayNoteDeprecation] Failed to load state:', error);
+        log.warn('Failed to load state:', error);
         return {};
     }
 }
@@ -89,7 +93,7 @@ export async function deprecateTodayNote(): Promise<void> {
 
     if (nextFrontmatter !== frontmatter || nextBody !== body) {
         await fs.writeFile(TODAY_NOTE_PATH, joinFrontmatter(nextFrontmatter, nextBody), 'utf-8');
-        console.log('[TodayNoteDeprecation] Deprecated Today.md live dashboard');
+        log.debug('Deprecated Today.md live dashboard');
     }
 
     await markProcessed();

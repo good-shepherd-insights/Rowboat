@@ -8,10 +8,14 @@ import { getKgModel } from '../models/defaults.js';
 import container from '../di/container.js';
 import type { IModelConfigRepo } from '../models/repo.js';
 import { createProvider } from '../models/models.js';
-import { inlineTask } from '@x/shared';
+import { rootLogger,  inlineTask } from '@x/shared';
 import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
+
+const log = rootLogger.child('InlineTasks');
+const classifyLog = rootLogger.child('classifySchedule');
+
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const INLINE_TASK_AGENT = 'inline_task_agent';
@@ -413,10 +417,10 @@ function updateBlockData(body: string, startLine: number, endLine: number, lastR
 // ---------------------------------------------------------------------------
 
 async function processInlineTasks(): Promise<void> {
-    console.log('[InlineTasks] Checking live notes...');
+    log.debug('Checking live notes...');
 
     if (!fs.existsSync(KNOWLEDGE_DIR)) {
-        console.log('[InlineTasks] Knowledge directory not found');
+        log.debug('Knowledge directory not found');
         return;
     }
 
@@ -451,14 +455,14 @@ async function processInlineTasks(): Promise<void> {
                 try {
                     fs.writeFileSync(filePath, newContent, 'utf-8');
                     const rel = path.relative(WorkDir, filePath);
-                    console.log(`[InlineTasks] Marked ${rel} as no longer live`);
+                    log.debug(`Marked ${rel} as no longer live`);
                 } catch { /* ignore */ }
             }
             continue;
         }
 
         const relativePath = path.relative(WorkDir, filePath);
-        console.log(`[InlineTasks] Found ${tasks.length} pending task(s) in ${relativePath}`);
+        log.debug(`Found ${tasks.length} pending task(s) in ${relativePath}`);
 
         // Process tasks one at a time, bottom-up so line indices stay valid
         // (inserting content shifts lines below, so process from bottom to top)
@@ -467,7 +471,7 @@ async function processInlineTasks(): Promise<void> {
         let currentBody = body;
 
         for (const task of sortedTasks) {
-            console.log(`[InlineTasks] Running task: "${task.instruction.slice(0, 80)}..."`);
+            log.debug(`Running task: "${task.instruction.slice(0, 80)}..."`);
 
             try {
                 const run = await createRun({
@@ -504,12 +508,12 @@ async function processInlineTasks(): Promise<void> {
                     const timestamp = new Date().toISOString();
                     currentBody = updateBlockData(currentBody, task.startLine, task.endLine, timestamp);
                     totalProcessed++;
-                    console.log(`[InlineTasks] Task completed`);
+                    log.debug(`Task completed`);
                 } else {
-                    console.warn(`[InlineTasks] No response from agent for task`);
+                    log.warn(`No response from agent for task`);
                 }
             } catch (error) {
-                console.error(`[InlineTasks] Error processing task:`, error);
+                log.error(`Error processing task:`, error);
             }
         }
 
@@ -522,16 +526,16 @@ async function processInlineTasks(): Promise<void> {
 
         try {
             fs.writeFileSync(filePath, newContent, 'utf-8');
-            console.log(`[InlineTasks] Updated ${relativePath}`);
+            log.debug(`Updated ${relativePath}`);
         } catch (error) {
-            console.error(`[InlineTasks] Error writing ${relativePath}:`, error);
+            log.error(`Error writing ${relativePath}:`, error);
         }
     }
 
     if (totalProcessed > 0) {
-        console.log(`[InlineTasks] Done. Processed ${totalProcessed} task(s).`);
+        log.debug(`Done. Processed ${totalProcessed} task(s).`);
     } else {
-        console.log('[InlineTasks] No pending tasks found');
+        log.debug('No pending tasks found');
     }
 }
 
@@ -680,7 +684,7 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
         });
 
         let text = result.text.trim();
-        console.log('[classifySchedule] LLM response:', text);
+        classifyLog.debug('LLM response:', text);
         // Strip markdown code fences if the LLM wraps the JSON
         text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
         if (text === 'null' || text === '') {
@@ -694,7 +698,7 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
 
         return parsed as InlineTaskSchedule;
     } catch (error) {
-        console.error('[classifySchedule] Error:', error);
+        classifyLog.error('Error:', error);
         return null;
     }
 }
@@ -703,8 +707,8 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
  * Main entry point — runs as independent polling service
  */
 export async function init() {
-    console.log('[InlineTasks] Starting Inline Task Service...');
-    console.log(`[InlineTasks] Will check for task blocks every ${SYNC_INTERVAL_MS / 1000} seconds`);
+    log.debug('Starting Inline Task Service...');
+    log.debug(`Will check for task blocks every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
     await processInlineTasks();
@@ -716,7 +720,7 @@ export async function init() {
         try {
             await processInlineTasks();
         } catch (error) {
-            console.error('[InlineTasks] Error in main loop:', error);
+            log.error('Error in main loop:', error);
         }
     }
 }
