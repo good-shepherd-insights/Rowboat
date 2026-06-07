@@ -16,9 +16,11 @@ export const ModelConfig = LlmModelConfig;
 const MASTRA_BASE_URL = 'https://gateway-api.mastra.ai/v1';
 
 const fetchWithMastra: typeof fetch = async (input, init) => {
+    const key = process.env.MASTRA_GATEWAY_API_KEY;
+    if (!key) return fetch(input, init);
     const headers = new Headers(init?.headers);
     if (!headers.has("X-Memory-Gateway-Authorization")) {
-        headers.set("X-Memory-Gateway-Authorization", `Bearer ${process.env.MASTRA_GATEWAY_API_KEY}`);
+        headers.set("X-Memory-Gateway-Authorization", `Bearer ${key}`);
     }
     return fetch(input, { ...init, headers });
 };
