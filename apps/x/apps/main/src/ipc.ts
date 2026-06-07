@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, shell, dialog, systemPreferences, desktopCapturer, app } from 'electron';
-import { ipc } from '@x/shared';
+import { rootLogger,  ipc } from '@x/shared';
 import path from 'node:path';
 import os from 'node:os';
 import {
@@ -14,6 +14,7 @@ import * as mcpCore from '@x/core/dist/mcp/mcp.js';
 import * as runsCore from '@x/core/dist/runs/runs.js';
 import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
+import { serviceLogger } from '@x/core/dist/services/service_logger.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
 import { exec } from 'node:child_process';
@@ -73,6 +74,9 @@ import {
   readRunIds as readTaskRunIds,
 } from '@x/core/dist/background-tasks/fileops.js';
 import { browserIpcHandlers } from './browser/ipc.js';
+
+const log = rootLogger.child('meeting');
+
 
 /**
  * Convert markdown to a styled HTML document for PDF/DOCX export.
@@ -648,6 +652,9 @@ export function setupIpcHandlers() {
     'codeMode:checkAgentStatus': async () => {
       return await checkCodeModeAgentStatus();
     },
+    'services:getLogLevel': async () => {
+      return { level: serviceLogger.getLogLevel() };
+    },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
       await repo.setConfig({ enabled: args.enabled });
@@ -881,7 +888,7 @@ export function setupIpcHandlers() {
     'meeting:checkScreenPermission': async () => {
       if (process.platform !== 'darwin') return { granted: true };
       const status = systemPreferences.getMediaAccessStatus('screen');
-      console.log('[meeting] Screen recording permission status:', status);
+      log.debug('Screen recording permission status:', status);
       if (status === 'granted') return { granted: true };
       // Not granted — call desktopCapturer.getSources() to register the app
       // in the macOS Screen Recording list. On first call this shows the
@@ -889,7 +896,7 @@ export function setupIpcHandlers() {
       try { await desktopCapturer.getSources({ types: ['screen'] }); } catch { /* ignore */ }
       // Re-check after the native prompt was dismissed
       const statusAfter = systemPreferences.getMediaAccessStatus('screen');
-      console.log('[meeting] Screen recording permission status after prompt:', statusAfter);
+      log.debug('Screen recording permission status after prompt:', statusAfter);
       return { granted: statusAfter === 'granted' };
     },
     'meeting:openScreenRecordingSettings': async () => {

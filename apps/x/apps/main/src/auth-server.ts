@@ -1,5 +1,9 @@
 import { createServer, Server } from 'http';
 import { URL } from 'url';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('OAuth');
+
 
 const OAUTH_CALLBACK_PATH = '/oauth/callback';
 export const DEFAULT_PORT = 8080;
@@ -132,7 +136,7 @@ export async function createAuthServer(
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (fallback && (code === 'EADDRINUSE' || code === 'EACCES') && p < limit) {
-        console.warn(`[OAuth] Port ${p} unavailable (${code}), trying ${p + 1}…`);
+        log.warn(`Port ${p} unavailable (${code}), trying ${p + 1}…`);
         continue;
       }
       if (!fallback) {

@@ -14,6 +14,10 @@ import {
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 import type { GmailThreadSnapshot } from './sync_gmail.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Email classifier');
+
 
 const STYLE_GUIDE_PATH = path.join(WorkDir, 'knowledge', 'Agent Notes', 'style', 'email.md');
 const CALENDAR_DIR = path.join(WorkDir, 'calendar_sync');
@@ -95,7 +99,7 @@ export async function getUserEmail(auth: OAuth2Client): Promise<string | null> {
             return cachedUserEmail;
         }
     } catch (err) {
-        console.warn('[Email classifier] getProfile failed:', err);
+        log.warn('getProfile failed:', err);
     }
     return null;
 }
@@ -258,7 +262,7 @@ export async function classifyThread(
         }
         return out;
     } catch (err) {
-        console.warn(`[Email classifier] LLM call failed for thread ${snapshot.threadId}:`, err);
+        log.warn(`LLM call failed for thread ${snapshot.threadId}:`, err);
         return { importance: 'important' };
     }
 }

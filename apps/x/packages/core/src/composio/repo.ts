@@ -3,6 +3,10 @@ import path from "path";
 import { z } from "zod";
 import { WorkDir } from "../config/config.js";
 import { ZLocalConnectedAccount, LocalConnectedAccount, ConnectedAccountStatus } from "./types.js";
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('ComposioRepo');
+
 
 const ACCOUNTS_FILE = path.join(WorkDir, 'data', 'composio', 'connected_accounts.json');
 
@@ -48,7 +52,7 @@ function loadAccounts(): ConnectedAccountsStorage {
             return ZConnectedAccountsStorage.parse(JSON.parse(data));
         }
     } catch (error) {
-        console.error('[ComposioRepo] Failed to load accounts:', error);
+        log.error('Failed to load accounts:', error);
     }
     return { accounts: {} };
 }
@@ -99,7 +103,7 @@ export class ComposioAccountsRepo implements IComposioAccountsRepo {
         const storage = loadAccounts();
         const account = storage.accounts[toolkitSlug];
         if (!account) {
-            console.warn(`[ComposioRepo] Cannot update status: account '${toolkitSlug}' not found`);
+            log.warn(`Cannot update status: account '${toolkitSlug}' not found`);
             return false;
         }
         account.status = status;

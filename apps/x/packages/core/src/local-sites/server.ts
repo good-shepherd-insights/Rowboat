@@ -6,6 +6,10 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import express from 'express';
 import { WorkDir } from '../config/config.js';
 import { LOCAL_SITE_SCAFFOLD } from './templates.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('LocalSites');
+
 
 export const LOCAL_SITES_PORT = 3210;
 export const LOCAL_SITES_BASE_URL = `http://localhost:${LOCAL_SITES_PORT}`;
@@ -340,7 +344,7 @@ async function startSiteWatcher(): Promise<void> {
       scheduleSiteReload(siteSlug, normalizedPath);
     })
     .on('error', (error: unknown) => {
-      console.error('[LocalSites] Watcher error:', error);
+      log.error('Watcher error:', error);
     });
 
   localSitesWatcher = watcher;
@@ -531,9 +535,9 @@ async function startServer(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const server = app.listen(LOCAL_SITES_PORT, 'localhost', () => {
       localSitesServer = server;
-      console.log('[LocalSites] Server starting.');
-      console.log(`  Sites directory: ${LOCAL_SITES_DIR}`);
-      console.log(`  Base URL: ${LOCAL_SITES_BASE_URL}`);
+      log.debug('Server starting.');
+      log.debug(`  Sites directory: ${LOCAL_SITES_DIR}`);
+      log.debug(`  Base URL: ${LOCAL_SITES_BASE_URL}`);
       resolve();
     });
 

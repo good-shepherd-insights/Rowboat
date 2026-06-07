@@ -1,5 +1,9 @@
 import z from 'zod';
 
+export { LIFECYCLE_EVENT_TYPES } from "./log-level.js";
+export type { LogLevelValue } from "./log-level.js";
+export { LEVEL_ORDER } from "./log-level.js";
+
 export const ServiceName = z.enum([
   'graph',
   'gmail',

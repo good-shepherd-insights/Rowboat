@@ -4,6 +4,10 @@ import { isSignedIn } from '../account/account.js';
 import { getAccessToken } from '../auth/tokens.js';
 import { WorkDir } from '../config/config.js';
 import { API_URL } from '../config/env.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('voice');
+
 
 export interface VoiceConfig {
     deepgram: { apiKey: string } | null;
@@ -47,7 +51,7 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
         };
-        console.log('[voice] synthesizing speech via Rowboat proxy, text length:', text.length, 'voiceId:', voiceId);
+        log.debug('synthesizing speech via Rowboat proxy, text length:', text.length, 'voiceId:', voiceId);
     } else {
         if (!config.elevenlabs) {
             throw new Error(`ElevenLabs not configured. Create ${path.join(WorkDir, 'config', 'elevenlabs.json')} with { "apiKey": "<your-key>" }`);
@@ -58,7 +62,7 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
             'xi-api-key': config.elevenlabs.apiKey,
             'Content-Type': 'application/json',
         };
-        console.log('[voice] synthesizing speech via ElevenLabs, text length:', text.length, 'voiceId:', voiceId);
+        log.debug('synthesizing speech via ElevenLabs, text length:', text.length, 'voiceId:', voiceId);
     }
 
     const response = await fetch(url, {
@@ -76,12 +80,12 @@ export async function synthesizeSpeech(text: string): Promise<{ audioBase64: str
 
     if (!response.ok) {
         const errText = await response.text().catch(() => 'Unknown error');
-        console.error('[voice] TTS API error:', response.status, errText);
+        log.error('TTS API error:', response.status, errText);
         throw new Error(`TTS API error ${response.status}: ${errText}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const audioBase64 = Buffer.from(arrayBuffer).toString('base64');
-    console.log('[voice] synthesized audio, base64 length:', audioBase64.length);
+    log.debug('synthesized audio, base64 length:', audioBase64.length);
     return { audioBase64, mimeType: 'audio/mpeg' };
 }

@@ -4,6 +4,10 @@ import type { Dirent } from "node:fs";
 import { WorkDir } from "../config/config.js";
 import container from "../di/container.js";
 import type { INotificationService } from "../application/notification/service.js";
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('CalendarNotify');
+
 
 const TICK_INTERVAL_MS = 30_000;
 // Notify when an event is between 30s in the past (started just now) and
@@ -138,9 +142,9 @@ async function tick(state: NotificationState): Promise<{ state: NotificationStat
                 link: `rowboat://action?type=join-and-take-meeting-notes&eventId=${eid}`,
                 actionLabel: "Join & Notes",
             });
-            console.log(`[CalendarNotify] notified for "${summary}" (${eventId})`);
+            log.debug(`notified for "${summary}" (${eventId})`);
         } catch (err) {
-            console.error(`[CalendarNotify] notify failed for ${eventId}:`, err);
+            log.error(`notify failed for ${eventId}:`, err);
             continue;
         }
 
@@ -155,8 +159,8 @@ async function tick(state: NotificationState): Promise<{ state: NotificationStat
 }
 
 export async function init(): Promise<void> {
-    console.log("[CalendarNotify] starting calendar notification service");
-    console.log(`[CalendarNotify] tick every ${TICK_INTERVAL_MS / 1000}s`);
+    log.debug("starting calendar notification service");
+    log.debug(`tick every ${TICK_INTERVAL_MS / 1000}s`);
 
     let state = gcState(await loadState());
 
@@ -169,11 +173,11 @@ export async function init(): Promise<void> {
                 try {
                     await saveState(state);
                 } catch (err) {
-                    console.error("[CalendarNotify] failed to save state:", err);
+                    log.error("failed to save state:", err);
                 }
             }
         } catch (err) {
-            console.error("[CalendarNotify] tick failed:", err);
+            log.error("tick failed:", err);
         }
         await new Promise((resolve) => setTimeout(resolve, TICK_INTERVAL_MS));
     }

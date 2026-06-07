@@ -1,6 +1,10 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { WorkDir } from '../../config/config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('browser-skills');
+
 
 const REPO_OWNER = 'browser-use';
 const REPO_NAME = 'browser-harness';
@@ -147,7 +151,7 @@ export async function refreshFromRemote(): Promise<SkillsIndex> {
         localPath,
       });
     } catch (err) {
-      console.warn(`[browser-skills] Failed to fetch ${repoPath}:`, err);
+      log.warn(`Failed to fetch ${repoPath}:`, err);
     }
   }));
 
@@ -177,7 +181,7 @@ export async function ensureLoaded(options?: { forceRefresh?: boolean }): Promis
       if (!inFlightRefresh) {
         inFlightRefresh = refreshFromRemote()
           .catch((err) => {
-            console.warn('[browser-skills] Background refresh failed:', err);
+            log.warn('Background refresh failed:', err);
             return existing;
           })
           .finally(() => { inFlightRefresh = null; });

@@ -7,6 +7,10 @@ import { CURATED_TOOLKIT_SLUGS } from '@x/shared/dist/composio.js';
 import type { LocalConnectedAccount, Toolkit } from '@x/core/dist/composio/types.js';
 import { triggerSync as triggerGmailSync } from '@x/core/dist/knowledge/sync_gmail.js';
 import { triggerSync as triggerCalendarSync } from '@x/core/dist/knowledge/sync_calendar.js';
+import { rootLogger } from '@x/shared/dist/logger.js';
+
+const log = rootLogger.child('Composio');
+
 
 const REDIRECT_URI = 'http://localhost:8081/oauth/callback';
 
@@ -64,7 +68,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
     error?: string;
 }> {
     try {
-        console.log(`[Composio] Initiating connection for ${toolkitSlug}...`);
+        log.debug(`Initiating connection for ${toolkitSlug}...`);
 
         // Check if already connected
         if (composioAccountsRepo.isConnected(toolkitSlug)) {
@@ -132,7 +136,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         // Abort any existing flow for this toolkit before starting a new one
         const existingFlow = activeFlows.get(toolkitSlug);
         if (existingFlow) {
-            console.log(`[Composio] Aborting existing flow for ${toolkitSlug}`);
+            log.debug(`Aborting existing flow for ${toolkitSlug}`);
             clearTimeout(existingFlow.timeout);
             existingFlow.server.close();
             activeFlows.delete(toolkitSlug);
@@ -179,7 +183,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
                     });
                 }
             } catch (error) {
-                console.error('[Composio] Failed to sync account status:', error);
+                log.error('Failed to sync account status:', error);
                 emitComposioEvent({
                     toolkitSlug,
                     success: false,
@@ -195,7 +199,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
         // Timeout for abandoned flows (5 minutes)
         const cleanupTimeout = setTimeout(() => {
             if (activeFlows.has(toolkitSlug)) {
-                console.log(`[Composio] Cleaning up abandoned flow for ${toolkitSlug}`);
+                log.debug(`Cleaning up abandoned flow for ${toolkitSlug}`);
                 activeFlows.delete(toolkitSlug);
                 server.close();
                 emitComposioEvent({
@@ -225,7 +229,7 @@ export async function initiateConnection(toolkitSlug: string): Promise<{
             connectedAccountId,
         };
     } catch (error) {
-        console.error('[Composio] Connection initiation failed:', error);
+        log.error('Connection initiation failed:', error);
         return {
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error',
@@ -262,7 +266,7 @@ export async function syncConnection(
         composioAccountsRepo.updateAccountStatus(toolkitSlug, accountStatus.status);
         return { status: accountStatus.status };
     } catch (error) {
-        console.error('[Composio] Failed to sync connection:', error);
+        log.error('Failed to sync connection:', error);
         return { status: 'FAILED' };
     }
 }
@@ -277,7 +281,7 @@ export async function disconnect(toolkitSlug: string): Promise<{ success: boolea
             await composioClient.deleteConnectedAccount(account.id);
         }
     } catch (error) {
-        console.error('[Composio] Disconnect failed:', error);
+        log.error('Disconnect failed:', error);
     } finally {
         // Always clean up local state, even if the API call fails
         composioAccountsRepo.deleteAccount(toolkitSlug);

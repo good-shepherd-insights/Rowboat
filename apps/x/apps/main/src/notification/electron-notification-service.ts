@@ -1,6 +1,10 @@
 import { BrowserWindow, Notification, shell } from "electron";
 import type { INotificationService, NotifyInput } from "@x/core/dist/application/notification/service.js";
 import { dispatchUrl } from "../deeplink.js";
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('notification');
+
 
 const HTTP_URL = /^https?:\/\//i;
 const ROWBOAT_URL = /^rowboat:\/\//i;
@@ -48,7 +52,7 @@ export class ElectronNotificationService implements INotificationService {
                 dispatchUrl(target);
             } else if (target && HTTP_URL.test(target)) {
                 shell.openExternal(target).catch((err) => {
-                    console.error("[notification] failed to open link:", err);
+                    log.error("failed to open link:", err);
                 });
             } else {
                 this.focusMainWindow();

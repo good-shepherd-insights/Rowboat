@@ -14,6 +14,10 @@ import {
     type NoteTaggingState,
 } from './note_tagging_state.js';
 import { getNoteTypeDefinitions } from './note_system.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('NoteTagging');
+
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const BATCH_SIZE = 15;
@@ -138,17 +142,17 @@ async function tagNoteBatch(
  * Process all untagged notes in batches
  */
 export async function processUntaggedNotes(): Promise<void> {
-    console.log('[NoteTagging] Checking for untagged notes...');
+    log.debug('Checking for untagged notes...');
 
     const state = loadNoteTaggingState();
     const untagged = getUntaggedNotes(state);
 
     if (untagged.length === 0) {
-        console.log('[NoteTagging] No untagged notes found');
+        log.debug('No untagged notes found');
         return;
     }
 
-    console.log(`[NoteTagging] Found ${untagged.length} untagged notes`);
+    log.debug(`Found ${untagged.length} untagged notes`);
 
     const run = await serviceLogger.startRun({
         service: 'note_tagging',
@@ -185,7 +189,7 @@ export async function processUntaggedNotes(): Promise<void> {
                     const content = fs.readFileSync(filePath, 'utf-8');
                     files.push({ path: filePath, content });
                 } catch (error) {
-                    console.error(`[NoteTagging] Error reading ${filePath}:`, error);
+                    log.error(`Error reading ${filePath}:`, error);
                 }
             }
 
@@ -193,7 +197,7 @@ export async function processUntaggedNotes(): Promise<void> {
                 continue;
             }
 
-            console.log(`[NoteTagging] Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`);
+            log.debug(`Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`);
             await serviceLogger.log({
                 type: 'progress',
                 service: run.service,
@@ -218,12 +222,12 @@ export async function processUntaggedNotes(): Promise<void> {
             }
 
             saveNoteTaggingState(state);
-            console.log(`[NoteTagging] Batch ${batchNumber}/${totalBatches} complete, ${result.filesEdited.size} files tagged`);
+            log.debug(`Batch ${batchNumber}/${totalBatches} complete, ${result.filesEdited.size} files tagged`);
         } catch (error) {
             hadError = true;
             failedBatches++;
             const errorDetails = getErrorDetails(error);
-            console.error(`[NoteTagging] Error processing batch ${batchNumber}:`, error);
+            log.error(`Error processing batch ${batchNumber}:`, error);
             await serviceLogger.log({
                 type: 'error',
                 service: run.service,
@@ -256,15 +260,15 @@ export async function processUntaggedNotes(): Promise<void> {
         },
     });
 
-    console.log(`[NoteTagging] Done. ${totalEdited} notes tagged.`);
+    log.debug(`Done. ${totalEdited} notes tagged.`);
 }
 
 /**
  * Main entry point - runs as independent polling service
  */
 export async function init() {
-    console.log('[NoteTagging] Starting Note Tagging Service...');
-    console.log(`[NoteTagging] Will check for untagged notes every ${SYNC_INTERVAL_MS / 1000} seconds`);
+    log.debug('Starting Note Tagging Service...');
+    log.debug(`Will check for untagged notes every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
     await processUntaggedNotes();
@@ -276,7 +280,7 @@ export async function init() {
         try {
             await processUntaggedNotes();
         } catch (error) {
-            console.error('[NoteTagging] Error in main loop:', error);
+            log.error('Error in main loop:', error);
         }
     }
 }

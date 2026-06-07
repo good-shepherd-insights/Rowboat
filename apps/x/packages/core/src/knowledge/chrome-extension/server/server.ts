@@ -4,6 +4,10 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../../../config/config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('ChromeSync');
+
 
 const app = express();
 app.use(cors());
@@ -234,7 +238,7 @@ function cleanUpOldFiles(): void {
         if (!fs.statSync(datePath).isDirectory()) continue;
 
         fs.rmSync(datePath, { recursive: true, force: true });
-        console.log(`[ChromeSync] Cleaned up old captures: ${dateEntry}`);
+        log.debug(`Cleaned up old captures: ${dateEntry}`);
     }
 }
 
@@ -256,10 +260,10 @@ function startServer(): void {
     setInterval(cleanUpOldFiles, CLEANUP_INTERVAL_MS);
 
     app.listen(PORT, 'localhost', () => {
-        console.log('[ChromeSync] Server starting.');
-        console.log(`  Captured pages: ${CAPTURED_PAGES_DIR}`);
-        console.log(`  Config: ${CONFIG_FILE}`);
-        console.log(`  Listening on http://localhost:${PORT}`);
+        log.debug('Server starting.');
+        log.debug(`  Captured pages: ${CAPTURED_PAGES_DIR}`);
+        log.debug(`  Config: ${CONFIG_FILE}`);
+        log.debug(`  Listening on http://localhost:${PORT}`);
     });
 }
 
@@ -271,10 +275,10 @@ export async function init(): Promise<void> {
         return;
     }
 
-    console.log('[ChromeSync] Server disabled, watching config for changes...');
+    log.debug('Server disabled, watching config for changes...');
     fs.watch(CONFIG_DIR, (_, filename) => {
         if (filename === 'chrome-plugin.json' && isServerEnabled()) {
-            console.log('[ChromeSync] serverEnabled set to true, starting server...');
+            log.debug('serverEnabled set to true, starting server...');
             startServer();
         }
     });

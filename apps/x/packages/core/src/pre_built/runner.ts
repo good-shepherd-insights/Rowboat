@@ -14,6 +14,10 @@ import {
     getUserConfigPath,
 } from './config.js';
 import { PREBUILT_AGENTS } from './types.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('PreBuilt');
+
 
 // Service configuration
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute which agents need to run
@@ -23,12 +27,12 @@ const PREBUILT_DIR = path.join(WorkDir, 'pre-built');
  * Run a pre-built agent by name
  */
 async function runAgent(agentName: string): Promise<void> {
-    console.log(`[PreBuilt] Running agent: ${agentName}`);
+    log.debug(`Running agent: ${agentName}`);
 
     // Check for user config
     const userConfig = loadUserConfig();
     if (!userConfig) {
-        console.log(`[PreBuilt] Skipping ${agentName}: No user config found. Create ${getUserConfigPath()}`);
+        log.debug(`Skipping ${agentName}: No user config found. Create ${getUserConfigPath()}`);
         return;
     }
 
@@ -67,9 +71,9 @@ Process new items and use the user context above to identify yourself when draft
         // Update last run time
         setLastRunTime(agentName, new Date());
 
-        console.log(`[PreBuilt] Agent ${agentName} completed successfully`);
+        log.debug(`Agent ${agentName} completed successfully`);
     } catch (error) {
-        console.error(`[PreBuilt] Error running agent ${agentName}:`, error);
+        log.error(`Error running agent ${agentName}:`, error);
         // Still update last run time to prevent rapid retries on persistent errors
         setLastRunTime(agentName, new Date());
     }
@@ -87,7 +91,7 @@ async function checkAndRunAgents(): Promise<void> {
                 await runAgent(agentName);
             }
         } catch (error) {
-            console.error(`[PreBuilt] Error checking/running agent ${agentName}:`, error);
+            log.error(`Error checking/running agent ${agentName}:`, error);
         }
     }
 }
@@ -100,12 +104,12 @@ function logStatus(): void {
     const enabledAgents = PREBUILT_AGENTS.filter(name => config.agents[name]?.enabled);
 
     if (enabledAgents.length === 0) {
-        console.log('[PreBuilt] No agents enabled. Enable agents in config/prebuilt.json');
+        log.debug('No agents enabled. Enable agents in config/prebuilt.json');
     } else {
-        console.log(`[PreBuilt] Enabled agents: ${enabledAgents.join(', ')}`);
+        log.debug(`Enabled agents: ${enabledAgents.join(', ')}`);
         for (const name of enabledAgents) {
             const agentConfig = getAgentConfig(name);
-            console.log(`[PreBuilt]   - ${name}: runs every ${agentConfig.intervalMs / 1000}s`);
+            log.debug(`- ${name}: runs every ${agentConfig.intervalMs / 1000}s`);
         }
     }
 }
@@ -114,9 +118,9 @@ function logStatus(): void {
  * Main entry point - runs as a service checking and running pre-built agents
  */
 export async function init(): Promise<void> {
-    console.log('[PreBuilt] Starting Pre-Built Agent Runner Service...');
-    console.log(`[PreBuilt] Available agents: ${PREBUILT_AGENTS.join(', ')}`);
-    console.log(`[PreBuilt] Will check for due agents every ${CHECK_INTERVAL_MS / 1000} seconds`);
+    log.debug('Starting Pre-Built Agent Runner Service...');
+    log.debug(`Available agents: ${PREBUILT_AGENTS.join(', ')}`);
+    log.debug(`Will check for due agents every ${CHECK_INTERVAL_MS / 1000} seconds`);
 
     logStatus();
 
@@ -130,7 +134,7 @@ export async function init(): Promise<void> {
         try {
             await checkAndRunAgents();
         } catch (error) {
-            console.error('[PreBuilt] Error in main loop:', error);
+            log.error('Error in main loop:', error);
         }
     }
 }

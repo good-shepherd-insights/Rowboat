@@ -8,6 +8,9 @@ import {
     UserConfig,
     PREBUILT_AGENTS,
 } from './types.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('PreBuilt');
 
 const CONFIG_PATH = path.join(WorkDir, 'config', 'prebuilt.json');
 const STATE_PATH = path.join(WorkDir, 'pre-built', 'runner_state.json');
@@ -46,7 +49,7 @@ export function loadConfig(): PreBuiltConfig {
         const parsed = JSON.parse(content);
         return PreBuiltConfig.parse(parsed);
     } catch (error) {
-        console.error('[PreBuilt] Error loading config:', error);
+        log.error('Error loading config:', error);
         return getDefaultConfig();
     }
 }
@@ -81,7 +84,7 @@ export function loadState(): PreBuiltState {
             return PreBuiltState.parse(parsed);
         }
     } catch (error) {
-        console.error('[PreBuilt] Error loading state:', error);
+        log.error('Error loading state:', error);
     }
     return { lastRunTimes: {} };
 }
@@ -128,7 +131,7 @@ export function loadUserConfig(): UserConfig | null {
             return UserConfig.parse(parsed);
         }
     } catch (error) {
-        console.error('[PreBuilt] Error loading user config:', error);
+        log.error('Error loading user config:', error);
     }
     return null;
 }

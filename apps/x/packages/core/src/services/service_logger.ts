@@ -2,6 +2,8 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import { WorkDir } from "../config/config.js";
+import { LEVEL_ORDER, LIFECYCLE_EVENT_TYPES, type LogLevelValue } from "@x/shared/dist/log-level.js";
+import { rootLogger } from "@x/shared/dist/logger.js";
 import { IdGen } from "../application/lib/id-gen.js";
 import type { ServiceEventType } from "@x/shared/dist/service-events.js";
 import { serviceBus } from "./service_bus.js";
@@ -30,6 +32,17 @@ export class ServiceLogger {
     private currentSize = 0;
     private initialized = false;
     private writeQueue: Promise<void> = Promise.resolve();
+
+    getLogLevel(): LogLevelValue {
+        return rootLogger.getMinLevel();
+    }
+
+    private shouldEmit(event: ServiceEventInput): boolean {
+        const minLevel = rootLogger.getMinLevel();
+        if (minLevel === "info") return true;
+        if (LIFECYCLE_EVENT_TYPES.has(event.type)) return true;
+        return LEVEL_ORDER[event.level as LogLevelValue] <= LEVEL_ORDER[minLevel];
+    }
 
     private async ensureReady(): Promise<void> {
         if (this.initialized) return;
@@ -72,6 +85,8 @@ export class ServiceLogger {
     }
 
     async log(event: ServiceEventInput): Promise<void> {
+        if (!this.shouldEmit(event)) return;
+
         const payload = {
             ...event,
             ts: new Date().toISOString(),

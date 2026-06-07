@@ -4,6 +4,10 @@ import { WorkDir } from '../config/config.js';
 import { FirefliesClientFactory } from './fireflies-client-factory.js';
 import { serviceLogger, type ServiceRunContext } from '../services/service_logger.js';
 import { limitEventItems } from './limit_event_items.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Fireflies');
+
 
 // Configuration
 const SYNC_DIR = path.join(WorkDir, 'knowledge', 'Meetings', 'fireflies');
@@ -19,7 +23,7 @@ let wakeResolve: (() => void) | null = null;
 
 export function triggerSync(): void {
     if (wakeResolve) {
-        console.log('[Fireflies] Triggered - waking up immediately');
+        log.debug('Triggered - waking up immediately');
         wakeResolve();
         wakeResolve = null;
     }
@@ -136,10 +140,10 @@ async function callWithRateLimit<T>(
                 errorMessage.includes('rate limit')) {
 
                 retries++;
-                console.log(`[Fireflies] Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${delay/1000}s...`);
+                log.debug(`Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${delay/1000}s...`);
 
                 if (retries >= MAX_RETRIES) {
-                    console.error(`[Fireflies] Max retries reached for ${operationName}. Skipping.`);
+                    log.error(`Max retries reached for ${operationName}. Skipping.`);
                     return null;
                 }
 
@@ -202,7 +206,7 @@ function saveState(lastSyncDate: string, syncedIds: string[], lastCheckTime?: st
  */
 function parseMcpResult<T>(result: McpToolResult): T | null {
     if (result.isError) {
-        console.error('[Fireflies] MCP tool returned error');
+        log.error('MCP tool returned error');
         return null;
     }
     
@@ -220,7 +224,7 @@ function parseMcpResult<T>(result: McpToolResult): T | null {
         return JSON.parse(textContent.text) as T;
     } catch {
         // If not JSON, return the text as-is (for toon format)
-        console.log('[Fireflies] Response is not JSON, may be in toon format');
+        log.debug('Response is not JSON, may be in toon format');
         return null;
     }
 }
@@ -378,7 +382,7 @@ function meetingToMarkdown(meeting: FirefliesMeetingData): string {
 // --- Sync Logic ---
 
 async function syncMeetings() {
-    console.log('[Fireflies] Starting sync...');
+    log.debug('Starting sync...');
 
     // Ensure sync directory exists
     if (!fs.existsSync(SYNC_DIR)) {
@@ -387,7 +391,7 @@ async function syncMeetings() {
 
     const client = await FirefliesClientFactory.getClient();
     if (!client) {
-        console.log('[Fireflies] No valid client available');
+        log.debug('No valid client available');
         return;
     }
 
@@ -401,7 +405,7 @@ async function syncMeetings() {
         const minutesSinceLastCheck = (now.getTime() - lastCheck.getTime()) / (1000 * 60);
 
         if (minutesSinceLastCheck < 5) {
-            console.log(`[Fireflies] Skipping - last check was ${minutesSinceLastCheck.toFixed(1)} minutes ago`);
+            log.debug(`Skipping - last check was ${minutesSinceLastCheck.toFixed(1)} minutes ago`);
             return;
         }
     }
@@ -414,7 +418,7 @@ async function syncMeetings() {
     const fromDateStr = fromDate.toISOString().split('T')[0]; // YYYY-MM-DD
     const toDateStr = toDate.toISOString().split('T')[0];
 
-    console.log(`[Fireflies] Fetching meetings from ${fromDateStr} to ${toDateStr}...`);
+    log.debug(`Fetching meetings from ${fromDateStr} to ${toDateStr}...`);
 
     let run: ServiceRunContext | null = null;
 
@@ -435,7 +439,7 @@ async function syncMeetings() {
         
         // Handle rate-limited failure
         if (!transcriptsResult) {
-            console.log('[Fireflies] Failed to fetch transcripts due to rate limit');
+            log.debug('Failed to fetch transcripts due to rate limit');
             saveState(toDateStr, Array.from(syncedIds), new Date().toISOString());
             return;
         }
@@ -454,16 +458,16 @@ async function syncMeetings() {
         }
 
         if (meetings.length === 0) {
-            console.log('[Fireflies] No transcripts found in date range');
+            log.debug('No transcripts found in date range');
             saveState(toDateStr, Array.from(syncedIds), new Date().toISOString());
             return;
         }
         
-        console.log(`[Fireflies] Found ${meetings.length} transcripts`);
+        log.debug(`Found ${meetings.length} transcripts`);
 
         const newMeetings = meetings.filter(m => m.id && !syncedIds.has(m.id));
         if (newMeetings.length === 0) {
-            console.log('[Fireflies] No new transcripts to sync');
+            log.debug('No new transcripts to sync');
             saveState(toDateStr, Array.from(syncedIds), new Date().toISOString());
             return;
         }
@@ -496,24 +500,24 @@ async function syncMeetings() {
 
             // Skip if already synced
             if (syncedIds.has(meetingId)) {
-                console.log(`[Fireflies] Skipping already synced: ${meeting.title || meetingId}`);
+                log.debug(`Skipping already synced: ${meeting.title || meetingId}`);
                 continue;
             }
 
             // Limit batch size to avoid too many API calls
             if (processedInBatch >= MAX_BATCH_SIZE) {
-                console.log(`[Fireflies] Reached batch limit (${MAX_BATCH_SIZE}), will continue in next sync`);
+                log.debug(`Reached batch limit (${MAX_BATCH_SIZE}), will continue in next sync`);
                 break;
             }
 
             // Add delay between API calls to respect rate limits
             if (processedInBatch > 0) {
-                console.log(`[Fireflies] Waiting ${API_DELAY_MS/1000}s before next API call...`);
+                log.debug(`Waiting ${API_DELAY_MS/1000}s before next API call...`);
                 await sleep(API_DELAY_MS);
             }
 
             try {
-                console.log(`[Fireflies] Fetching full transcript: ${meeting.title || meetingId}`);
+                log.debug(`Fetching full transcript: ${meeting.title || meetingId}`);
 
                 // Try to get transcript sentences using fireflies_get_transcript with rate limiting
                 let sentences: FirefliesTranscriptSentence[] = [];
@@ -543,14 +547,14 @@ async function syncMeetings() {
                             const rawText = getRawText(transcriptResult);
                             if (rawText) {
                                 sentences = parseToonTranscript(rawText);
-                                console.log(`[Fireflies] Parsed ${sentences.length} sentences from toon format`);
+                                log.debug(`Parsed ${sentences.length} sentences from toon format`);
                             }
                         }
                     } else {
-                        console.log(`[Fireflies] Skipping transcript due to rate limit: ${meetingId}`);
+                        log.debug(`Skipping transcript due to rate limit: ${meetingId}`);
                     }
                 } catch (err) {
-                    console.log(`[Fireflies] Could not fetch transcript sentences: ${err}`);
+                    log.debug(`Could not fetch transcript sentences: ${err}`);
                 }
                 
                 // Build meeting data from the list response + transcript
@@ -581,18 +585,18 @@ async function syncMeetings() {
                 const filePath = path.join(dateDir, filename);
                 
                 fs.writeFileSync(filePath, markdown);
-                console.log(`[Fireflies] Saved: ${filename}`);
+                log.debug(`Saved: ${filename}`);
 
                 syncedIds.add(meetingId);
                 newCount++;
                 processedInBatch++;
             } catch (error) {
-                console.error(`[Fireflies] Error fetching meeting ${meetingId}:`, error);
+                log.error(`Error fetching meeting ${meetingId}:`, error);
                 // Continue with next meeting
             }
         }
 
-        console.log(`[Fireflies] Synced ${newCount} new transcripts in this batch`);
+        log.debug(`Synced ${newCount} new transcripts in this batch`);
 
         // Save state with updated timestamp
         saveState(toDateStr, Array.from(syncedIds), new Date().toISOString());
@@ -609,7 +613,7 @@ async function syncMeetings() {
         });
         
     } catch (error) {
-        console.error('[Fireflies] Error during sync:', error);
+        log.error('Error during sync:', error);
         if (run) {
             await serviceLogger.log({
                 type: 'error',
@@ -633,7 +637,7 @@ async function syncMeetings() {
         // Check if it's an auth error
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
-            console.log('[Fireflies] Auth error, clearing cache');
+            log.debug('Auth error, clearing cache');
             await FirefliesClientFactory.clearCache();
         }
     }
@@ -643,9 +647,9 @@ async function syncMeetings() {
  * Main sync loop
  */
 export async function init() {
-    console.log('[Fireflies] Starting Fireflies Sync...');
-    console.log(`[Fireflies] Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
-    console.log(`[Fireflies] Syncing transcripts from the last ${LOOKBACK_DAYS} days.`);
+    log.debug('Starting Fireflies Sync...');
+    log.debug(`Will sync every ${SYNC_INTERVAL_MS / 1000} seconds.`);
+    log.debug(`Syncing transcripts from the last ${LOOKBACK_DAYS} days.`);
 
     while (true) {
         try {
@@ -653,17 +657,17 @@ export async function init() {
             const hasCredentials = await FirefliesClientFactory.hasValidCredentials();
             
             if (!hasCredentials) {
-                console.log('[Fireflies] OAuth credentials not available. Sleeping...');
+                log.debug('OAuth credentials not available. Sleeping...');
             } else {
                 // Perform sync
                 await syncMeetings();
             }
         } catch (error) {
-            console.error('[Fireflies] Error in main loop:', error);
+            log.error('Error in main loop:', error);
         }
 
         // Sleep before next check (can be interrupted by triggerSync)
-        console.log(`[Fireflies] Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
+        log.debug(`Sleeping for ${SYNC_INTERVAL_MS / 1000} seconds...`);
         await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }

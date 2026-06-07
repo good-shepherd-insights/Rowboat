@@ -1,6 +1,10 @@
 import { PostHog } from 'posthog-node';
 import { getInstallationId } from './installation.js';
 import { API_URL } from '../config/env.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Analytics');
+
 
 // Build-time injected via esbuild `define` (apps/main/bundle.mjs).
 // In dev/tsc, fall back to process.env so local runs work too.
@@ -16,7 +20,7 @@ function getClient(): PostHog | null {
   if (initAttempted) return client;
   initAttempted = true;
   if (!POSTHOG_KEY) {
-    console.log('[Analytics] POSTHOG_KEY not set; analytics disabled');
+    log.debug('POSTHOG_KEY not set; analytics disabled');
     return null;
   }
   try {
@@ -33,7 +37,7 @@ function getClient(): PostHog | null {
       properties: { api_url: API_URL, ...appVersionProperties() },
     });
   } catch (err) {
-    console.error('[Analytics] Failed to init PostHog:', err);
+    log.error('Failed to init PostHog:', err);
     client = null;
   }
   return client;
@@ -60,7 +64,7 @@ export function capture(event: string, properties?: Record<string, unknown>): vo
       },
     });
   } catch (err) {
-    console.error('[Analytics] capture failed:', err);
+    log.error('capture failed:', err);
   }
 }
 
@@ -81,7 +85,7 @@ export function identify(userId: string, properties?: Record<string, unknown>): 
     });
     identifiedUserId = userId;
   } catch (err) {
-    console.error('[Analytics] identify failed:', err);
+    log.error('identify failed:', err);
   }
 }
 
@@ -94,6 +98,6 @@ export async function shutdown(): Promise<void> {
   try {
     await client.shutdown();
   } catch (err) {
-    console.error('[Analytics] shutdown failed:', err);
+    log.error('shutdown failed:', err);
   }
 }

@@ -2,6 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { WorkDir } from '../config/config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('GraphState');
+
 
 /**
  * State tracking for knowledge graph processing
@@ -29,7 +33,7 @@ export function loadState(): GraphState {
         try {
             return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
         } catch (error) {
-            console.error('Error loading knowledge graph state:', error);
+            log.error('Error loading knowledge graph state:', error);
         }
     }
 
@@ -46,7 +50,7 @@ export function saveState(state: GraphState): void {
     try {
         fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     } catch (error) {
-        console.error('Error saving knowledge graph state:', error);
+        log.error('Error saving knowledge graph state:', error);
         throw error;
     }
 }

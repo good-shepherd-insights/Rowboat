@@ -6,6 +6,9 @@ import {
     setStrictnessAndMarkConfigured,
     isStrictnessConfigured,
 } from './note_creation_config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('StrictnessAnalyzer');
 
 const GMAIL_SYNC_DIR = path.join(WorkDir, 'gmail_sync');
 
@@ -168,7 +171,7 @@ function parseEmailFile(filePath: string): EmailInfo | null {
             date: latestDate,
         };
     } catch (error) {
-        console.error(`Error parsing email file ${filePath}:`, error);
+        log.error(`Error parsing email file ${filePath}:`, error);
         return null;
     }
 }
@@ -337,7 +340,7 @@ export function analyzeEmailsAndRecommend(): AnalysisResult {
     }
 
     const userDomain = inferUserDomain(emails);
-    console.log(`[StrictnessAnalyzer] Inferred user domain: ${userDomain}`);
+    log.debug(`Inferred user domain: ${userDomain}`);
 
     // Track unique senders by category
     const uniqueSenders = new Set<string>();
@@ -443,40 +446,40 @@ export function autoConfigureStrictnessIfNeeded(): boolean {
 
     // Check if there are any emails to analyze
     if (!fs.existsSync(GMAIL_SYNC_DIR)) {
-        console.log('[StrictnessAnalyzer] No gmail_sync directory found, skipping auto-configuration');
+        log.debug('No gmail_sync directory found, skipping auto-configuration');
         return false;
     }
 
     const emailFiles = fs.readdirSync(GMAIL_SYNC_DIR).filter(f => f.endsWith('.md'));
     if (emailFiles.length === 0) {
-        console.log('[StrictnessAnalyzer] No emails found to analyze, skipping auto-configuration');
+        log.debug('No emails found to analyze, skipping auto-configuration');
         return false;
     }
 
     // Need at least 10 emails for meaningful analysis
     if (emailFiles.length < 10) {
-        console.log(`[StrictnessAnalyzer] Only ${emailFiles.length} emails found, need at least 10 for meaningful analysis. Using default 'high' strictness.`);
+        log.debug(`Only ${emailFiles.length} emails found, need at least 10 for meaningful analysis. Using default 'high' strictness.`);
         setStrictnessAndMarkConfigured('high');
         return true;
     }
 
-    console.log('[StrictnessAnalyzer] Running email analysis for auto-configuration...');
+    log.debug('Running email analysis for auto-configuration...');
     const result = analyzeEmailsAndRecommend();
 
-    console.log('[StrictnessAnalyzer] Analysis complete:');
-    console.log(`  - Total emails analyzed: ${result.totalEmails}`);
-    console.log(`  - Unique external senders: ${result.uniqueSenders}`);
-    console.log(`  - Newsletters/mass emails: ${result.newsletterCount}`);
-    console.log(`  - Automated/transactional: ${result.automatedCount}`);
-    console.log(`  - Consumer services: ${result.consumerServiceCount}`);
-    console.log(`  - Business emails: ${result.businessCount}`);
-    console.log(`  - Medium strictness would capture: ${result.mediumWouldCreate} contacts`);
-    console.log(`  - Low strictness would capture: ${result.lowWouldCreate} contacts`);
-    console.log(`  - Recommendation: ${result.recommendation.toUpperCase()}`);
-    console.log(`  - Reason: ${result.reason}`);
+    log.debug('Analysis complete:');
+    log.debug(`  - Total emails analyzed: ${result.totalEmails}`);
+    log.debug(`  - Unique external senders: ${result.uniqueSenders}`);
+    log.debug(`  - Newsletters/mass emails: ${result.newsletterCount}`);
+    log.debug(`  - Automated/transactional: ${result.automatedCount}`);
+    log.debug(`  - Consumer services: ${result.consumerServiceCount}`);
+    log.debug(`  - Business emails: ${result.businessCount}`);
+    log.debug(`  - Medium strictness would capture: ${result.mediumWouldCreate} contacts`);
+    log.debug(`  - Low strictness would capture: ${result.lowWouldCreate} contacts`);
+    log.debug(`  - Recommendation: ${result.recommendation.toUpperCase()}`);
+    log.debug(`  - Reason: ${result.reason}`);
 
     setStrictnessAndMarkConfigured(result.recommendation);
-    console.log(`[StrictnessAnalyzer] Auto-configured note creation strictness to: ${result.recommendation}`);
+    log.debug(`Auto-configured note creation strictness to: ${result.recommendation}`);
 
     return true;
 }

@@ -4,11 +4,15 @@ import { IClientRegistrationRepo } from './client-repo.js';
 import { getProviderConfig } from './providers.js';
 import * as oauthClient from './oauth-client.js';
 import { OAuthTokens } from './types.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Auth');
+
 
 let refreshInFlight: Promise<OAuthTokens> | null = null;
 
 async function performRefresh(tokens: OAuthTokens): Promise<OAuthTokens> {
-    console.log("Refreshing rowboat access token");
+    log.debug("Refreshing rowboat access token");
     if (!tokens.refresh_token) {
         throw new Error('Rowboat token expired and no refresh token available. Please sign in again.');
     }

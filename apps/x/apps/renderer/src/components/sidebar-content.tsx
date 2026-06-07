@@ -61,6 +61,7 @@ import { extractConferenceLink } from "@/lib/calendar-event"
 import { useBilling } from "@/hooks/useBilling"
 import { toast } from "@/lib/toast"
 import { ServiceEvent } from "@x/shared/src/service-events.js"
+import { LEVEL_ORDER, LIFECYCLE_EVENT_TYPES, type LogLevelValue } from "@x/shared/src/log-level.js"
 import z from "zod"
 
 interface TreeNode {
@@ -162,6 +163,12 @@ function collectServiceErrors(events: ServiceEventType[]): Map<string, string> {
   return errors
 }
 
+function shouldShowEvent(event: ServiceEventType, level: LogLevelValue): boolean {
+  if (level === 'info') return true
+  if (LIFECYCLE_EVENT_TYPES.has(event.type)) return true
+  return LEVEL_ORDER[event.level] <= LEVEL_ORDER[level]
+}
+
 type SidebarContentPanelProps = {
   tree: TreeNode[]
   onSelectFile: (path: string, kind: "file" | "dir") => void
@@ -195,6 +202,7 @@ function SyncStatusBar() {
   const { state } = useSidebar()
   const [activeServices, setActiveServices] = useState<Map<string, string>>(new Map())
   const [serviceErrors, setServiceErrors] = useState<Map<string, string>>(new Map())
+  const [logLevel, setLogLevel] = useState<LogLevelValue>('info')
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [logEvents, setLogEvents] = useState<ServiceEventType[]>([])
   const [logLoading, setLogLoading] = useState(false)
@@ -259,6 +267,20 @@ function SyncStatusBar() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    async function fetchLevel() {
+      try {
+        const result = await window.ipc.invoke('services:getLogLevel', null)
+        if (!cancelled) setLogLevel(result.level)
+      } catch {
+        // Fall back to 'info' if IPC fails
+      }
+    }
+    fetchLevel()
+    return () => { cancelled = true }
+  }, [])
+
   // Load logs from JSONL file when popover opens
   useEffect(() => {
     if (!popoverOpen) return
@@ -280,9 +302,10 @@ function SyncStatusBar() {
             // skip malformed lines
           }
         }
-        setServiceErrors(collectServiceErrors(parsed))
+        const filtered = parsed.filter((e) => shouldShowEvent(e, logLevel))
+        setServiceErrors(collectServiceErrors(filtered))
         // Newest first, limit to 1000
-        setLogEvents(parsed.reverse().slice(0, MAX_SYNC_EVENTS))
+        setLogEvents(filtered.reverse().slice(0, MAX_SYNC_EVENTS))
       } catch {
         if (!cancelled) {
           setLogEvents([])
@@ -294,7 +317,7 @@ function SyncStatusBar() {
     }
     loadLogs()
     return () => { cancelled = true }
-  }, [popoverOpen])
+  }, [popoverOpen, logLevel])
 
   const isSyncing = activeServices.size > 0
   const isCollapsed = state === "collapsed"

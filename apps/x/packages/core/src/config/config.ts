@@ -2,6 +2,11 @@ import path from "path";
 import fs from "fs";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
+import { rootLogger } from '@x/shared';
+
+const deprecateLog = rootLogger.child('TodayNoteDeprecation');
+const versionLog = rootLogger.child('VersionHistory');
+
 
 function resolveWorkDir(): string {
     const configured = process.env.ROWBOAT_WORKDIR;
@@ -52,10 +57,10 @@ ensureDefaultConfigs();
 // One-time deprecation for the old Today.md live dashboard. New installs no
 // longer get a generated Today.md; existing files are paused in place.
 import('../knowledge/deprecate_today_note.js').then(m => m.deprecateTodayNote()).catch(err => {
-    console.error('[TodayNoteDeprecation] Failed to deprecate Today.md:', err);
+    deprecateLog.error('Failed to deprecate Today.md:', err);
 });
 
 // Initialize version history repo (async, fire-and-forget on startup)
 import('../knowledge/version_history.js').then(m => m.initRepo()).catch(err => {
-    console.error('[VersionHistory] Failed to init repo:', err);
+    versionLog.error('Failed to init repo:', err);
 });

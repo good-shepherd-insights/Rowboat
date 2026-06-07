@@ -53,6 +53,10 @@ import { getAccessToken } from "../../auth/tokens.js";
 import { API_URL } from "../../config/env.js";
 import type { IBrowserControlService } from "../browser-control/service.js";
 import type { INotificationService } from "../notification/service.js";
+import { rootLogger } from '@x/shared/dist/logger.js';
+
+const log = rootLogger.child('Composio');
+
 // Parser libraries are loaded dynamically inside parseFile.execute()
 // to avoid pulling pdfjs-dist's DOM polyfills into the main bundle.
 // Import paths are computed so esbuild cannot statically resolve them.
@@ -1359,7 +1363,7 @@ export const BuiltinTools: z.infer<typeof BuiltinToolsSchema> = {
                 });
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                console.error(`[Composio] Tool execution failed for ${toolSlug}:`, message);
+                log.error(`Tool execution failed for ${toolSlug}:`, message);
                 return {
                     successful: false,
                     data: null,
