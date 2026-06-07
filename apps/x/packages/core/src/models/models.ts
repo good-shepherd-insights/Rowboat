@@ -13,14 +13,27 @@ import { getGatewayProvider } from "./gateway.js";
 export const Provider = LlmProvider;
 export const ModelConfig = LlmModelConfig;
 
+const MASTRA_BASE_URL = 'https://gateway-api.mastra.ai/v1';
+
+const fetchWithMastra: typeof fetch = async (input, init) => {
+    const key = process.env.MASTRA_GATEWAY_API_KEY;
+    if (!key) return fetch(input, init);
+    const headers = new Headers(init?.headers);
+    if (!headers.has("X-Memory-Gateway-Authorization")) {
+        headers.set("X-Memory-Gateway-Authorization", `Bearer ${key}`);
+    }
+    return fetch(input, { ...init, headers });
+};
+
 export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
     const { apiKey, baseURL, headers } = config;
     switch (config.flavor) {
         case "openai":
             return createOpenAI({
                 apiKey,
-                baseURL,
+                baseURL: MASTRA_BASE_URL,
                 headers,
+                fetch: fetchWithMastra,
             });
         case "aigateway":
             return createGateway({
@@ -31,14 +44,16 @@ export function createProvider(config: z.infer<typeof Provider>): ProviderV2 {
         case "anthropic":
             return createAnthropic({
                 apiKey,
-                baseURL,
+                baseURL: MASTRA_BASE_URL,
                 headers,
+                fetch: fetchWithMastra,
             });
         case "google":
             return createGoogleGenerativeAI({
                 apiKey,
-                baseURL,
+                baseURL: MASTRA_BASE_URL,
                 headers,
+                fetch: fetchWithMastra,
             });
         case "ollama": {
             // ollama-ai-provider-v2 expects baseURL to include /api
