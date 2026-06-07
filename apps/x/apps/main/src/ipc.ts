@@ -14,6 +14,7 @@ import * as mcpCore from '@x/core/dist/mcp/mcp.js';
 import * as runsCore from '@x/core/dist/runs/runs.js';
 import { bus } from '@x/core/dist/runs/bus.js';
 import { serviceBus } from '@x/core/dist/services/service_bus.js';
+import { serviceLogger } from '@x/core/dist/services/service_logger.js';
 import type { FSWatcher } from 'chokidar';
 import fs from 'node:fs/promises';
 import { exec } from 'node:child_process';
@@ -647,6 +648,9 @@ export function setupIpcHandlers() {
     },
     'codeMode:checkAgentStatus': async () => {
       return await checkCodeModeAgentStatus();
+    },
+    'services:getLogLevel': async () => {
+      return { level: serviceLogger.getLogLevel() };
     },
     'granola:setConfig': async (_event, args) => {
       const repo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
