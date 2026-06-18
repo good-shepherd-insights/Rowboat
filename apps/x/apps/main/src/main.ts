@@ -36,7 +36,6 @@ import { identifyIfSignedIn } from "@x/core/dist/analytics/identify.js";
 
 import { initConfigs } from "@x/core/dist/config/initConfigs.js";
 import { resolveWorkspacePath } from "@x/core/dist/workspace/workspace.js";
-import started from "electron-squirrel-startup";
 import { execSync, exec, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { init as initChromeSync } from "@x/core/dist/knowledge/chrome-extension/server/server.js";
@@ -52,6 +51,14 @@ import {
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
+
+// electron-squirrel-startup is Windows-only installer plumbing; on non-
+// Windows it's a no-op that returns false. Its top-level `require('app')`
+// breaks esbuild bundling for macOS/Linux, so we hide the require from
+// the bundler and only invoke it on Windows.
+const started = process.platform === 'win32'
+  ? (Function('return require'))()('electron-squirrel-startup')
+  : false;
 
 const execAsync = promisify(exec);
 
