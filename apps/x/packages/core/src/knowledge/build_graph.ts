@@ -18,6 +18,11 @@ import { buildKnowledgeIndex, formatIndexForPrompt } from './knowledge_index.js'
 import { limitEventItems } from './limit_event_items.js';
 import { commitAll } from './version_history.js';
 import { getTagDefinitions } from './tag_system.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('GraphBuilder');
+const buildLog = rootLogger.child('buildGraph');
+
 
 /**
  * Build obsidian-style knowledge graph by running topic extraction
@@ -113,10 +118,10 @@ function ensureSuggestedTopicsFileLocation(): string {
 
         try {
             fs.renameSync(legacy.absPath, SUGGESTED_TOPICS_PATH);
-            console.log(`[buildGraph] Moved suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}`);
+            buildLog.debug(`Moved suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}`);
             return SUGGESTED_TOPICS_PATH;
         } catch (error) {
-            console.error(`[buildGraph] Failed to move suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}:`, error);
+            buildLog.error(`Failed to move suggested topics file from ${legacy.relPath} to ${SUGGESTED_TOPICS_REL_PATH}:`, error);
             return legacy.absPath;
         }
     }
@@ -134,7 +139,7 @@ function readSuggestedTopicsFile(): string {
         const content = fs.readFileSync(suggestedTopicsPath, 'utf-8').trim();
         return content.length > 0 ? content : '_Existing suggested topics file is empty._';
     } catch (error) {
-        console.error(`[buildGraph] Error reading suggested topics file:`, error);
+        buildLog.error(`Error reading suggested topics file:`, error);
         return '_Failed to read existing suggested topics file._';
     }
 }
@@ -145,10 +150,10 @@ function readSuggestedTopicsFile(): string {
  * Returns paths to files that need entity extraction.
  */
 function getUnprocessedVoiceMemos(state: GraphState): string[] {
-    console.log(`[GraphBuilder] Checking directory: ${VOICE_MEMOS_KNOWLEDGE_DIR}`);
+    log.debug(`Checking directory: ${VOICE_MEMOS_KNOWLEDGE_DIR}`);
 
     if (!fs.existsSync(VOICE_MEMOS_KNOWLEDGE_DIR)) {
-        console.log(`[GraphBuilder] Directory does not exist`);
+        log.debug(`Directory does not exist`);
         return [];
     }
 
@@ -156,7 +161,7 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
 
     // Scan date folders (e.g., 2026-02-03)
     const dateFolders = fs.readdirSync(VOICE_MEMOS_KNOWLEDGE_DIR);
-    console.log(`[GraphBuilder] Found ${dateFolders.length} date folders: ${dateFolders.join(', ')}`);
+    log.debug(`Found ${dateFolders.length} date folders: ${dateFolders.join(', ')}`);
 
     for (const dateFolder of dateFolders) {
         const dateFolderPath = path.join(VOICE_MEMOS_KNOWLEDGE_DIR, dateFolder);
@@ -167,18 +172,18 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
                 continue;
             }
         } catch (err) {
-            console.log(`[GraphBuilder] Error checking ${dateFolderPath}:`, err);
+            log.debug(`Error checking ${dateFolderPath}:`, err);
             continue;
         }
 
         // Scan markdown files in this date folder
         const files = fs.readdirSync(dateFolderPath);
-        console.log(`[GraphBuilder] Found ${files.length} files in ${dateFolder}: ${files.join(', ')}`);
+        log.debug(`Found ${files.length} files in ${dateFolder}: ${files.join(', ')}`);
 
         for (const file of files) {
             // Only process voice memo markdown files
             if (!file.endsWith('.md') || !file.startsWith('voice-memo-')) {
-                console.log(`[GraphBuilder] Skipping ${file} - not a voice memo file`);
+                log.debug(`Skipping ${file} - not a voice memo file`);
                 continue;
             }
 
@@ -186,7 +191,7 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
 
             // Skip if already processed
             if (state.processedFiles[filePath]) {
-                console.log(`[GraphBuilder] Skipping ${file} - already processed`);
+                log.debug(`Skipping ${file} - already processed`);
                 continue;
             }
 
@@ -195,27 +200,27 @@ function getUnprocessedVoiceMemos(state: GraphState): string[] {
                 const content = fs.readFileSync(filePath, 'utf-8');
                 // Skip files that are still recording or transcribing
                 if (content.includes('*Recording in progress...*')) {
-                    console.log(`[GraphBuilder] Skipping ${file} - still recording`);
+                    log.debug(`Skipping ${file} - still recording`);
                     continue;
                 }
                 if (content.includes('*Transcribing...*')) {
-                    console.log(`[GraphBuilder] Skipping ${file} - still transcribing`);
+                    log.debug(`Skipping ${file} - still transcribing`);
                     continue;
                 }
                 if (content.includes('*Transcription failed')) {
-                    console.log(`[GraphBuilder] Skipping ${file} - transcription failed`);
+                    log.debug(`Skipping ${file} - transcription failed`);
                     continue;
                 }
-                console.log(`[GraphBuilder] Found unprocessed voice memo: ${file}`);
+                log.debug(`Found unprocessed voice memo: ${file}`);
                 unprocessedFiles.push(filePath);
             } catch (err) {
-                console.log(`[GraphBuilder] Error reading ${file}:`, err);
+                log.debug(`Error reading ${file}:`, err);
                 continue;
             }
         }
     }
 
-    console.log(`[GraphBuilder] Total unprocessed files: ${unprocessedFiles.length}`);
+    log.debug(`Total unprocessed files: ${unprocessedFiles.length}`);
     return unprocessedFiles;
 }
 
@@ -230,7 +235,7 @@ async function readFileContents(filePaths: string[]): Promise<{ path: string; co
             const content = fs.readFileSync(filePath, 'utf-8');
             files.push({ path: filePath, content });
         } catch (error) {
-            console.error(`Error reading file ${filePath}:`, error);
+            log.error(`Error reading file ${filePath}:`, error);
         }
     }
 
@@ -341,27 +346,27 @@ async function buildGraphWithFiles(
     state: GraphState,
     run?: ServiceRunContext
 ): Promise<BatchResult> {
-    console.log(`[buildGraph] Starting build for directory: ${sourceDir}`);
+    buildLog.debug(`Starting build for directory: ${sourceDir}`);
 
     if (filesToProcess.length === 0) {
-        console.log(`[buildGraph] No new or changed files to process in ${path.basename(sourceDir)}`);
+        buildLog.debug(`No new or changed files to process in ${path.basename(sourceDir)}`);
         return { processedFiles: [], notesCreated: new Set(), notesModified: new Set(), hadError: false };
     }
 
-    console.log(`[buildGraph] Found ${filesToProcess.length} new/changed files to process in ${path.basename(sourceDir)}`);
+    buildLog.debug(`Found ${filesToProcess.length} new/changed files to process in ${path.basename(sourceDir)}`);
 
     // Read file contents
     const contentFiles = await readFileContents(filesToProcess);
 
     if (contentFiles.length === 0) {
-        console.log(`No files could be read from ${sourceDir}`);
+        log.debug(`No files could be read from ${sourceDir}`);
         return { processedFiles: [], notesCreated: new Set(), notesModified: new Set(), hadError: false };
     }
 
     const BATCH_SIZE = 1; // One source file per agent run — prevents cross-file entity contamination in the graph
     const totalBatches = Math.ceil(contentFiles.length / BATCH_SIZE);
 
-    console.log(`Processing ${contentFiles.length} files in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
+    log.debug(`Processing ${contentFiles.length} files in ${totalBatches} batches (${BATCH_SIZE} files per batch)...`);
 
     const processedFiles: string[] = [];
     const notesCreated = new Set<string>();
@@ -375,14 +380,14 @@ async function buildGraphWithFiles(
 
         try {
             // Build fresh index before each batch to include notes from previous batches
-            console.log(`Building knowledge index for batch ${batchNumber}...`);
+            log.debug(`Building knowledge index for batch ${batchNumber}...`);
             const indexStartTime = Date.now();
             const index = buildKnowledgeIndex();
             const indexForPrompt = formatIndexForPrompt(index);
             const indexDuration = ((Date.now() - indexStartTime) / 1000).toFixed(2);
-            console.log(`Index built in ${indexDuration}s: ${index.people.length} people, ${index.organizations.length} orgs, ${index.projects.length} projects, ${index.topics.length} topics, ${index.other.length} other`);
+            log.debug(`Index built in ${indexDuration}s: ${index.people.length} people, ${index.organizations.length} orgs, ${index.projects.length} projects, ${index.topics.length} topics, ${index.other.length} other`);
 
-            console.log(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            log.debug(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
             if (run) {
                 await serviceLogger.log({
                     type: 'progress',
@@ -399,7 +404,7 @@ async function buildGraphWithFiles(
             const agentStartTime = Date.now();
             const batchResult = await createNotesFromBatch(batch, batchNumber, indexForPrompt);
             const agentDuration = ((Date.now() - agentStartTime) / 1000).toFixed(2);
-            console.log(`Batch ${batchNumber}/${totalBatches} complete in ${agentDuration}s`);
+            log.debug(`Batch ${batchNumber}/${totalBatches} complete in ${agentDuration}s`);
 
             for (const note of batchResult.notesCreated) {
                 notesCreated.add(note);
@@ -422,11 +427,11 @@ async function buildGraphWithFiles(
             try {
                 await commitAll('Knowledge update', 'Rowboat');
             } catch (err) {
-                console.error(`[GraphBuilder] Failed to commit version history:`, err);
+                log.error(`Failed to commit version history:`, err);
             }
         } catch (error) {
             hadError = true;
-            console.error(`Error processing batch ${batchNumber}:`, error);
+            log.error(`Error processing batch ${batchNumber}:`, error);
             if (run) {
                 await serviceLogger.log({
                     type: 'error',
@@ -446,17 +451,17 @@ async function buildGraphWithFiles(
     state.lastBuildTime = new Date().toISOString();
     saveState(state);
 
-    console.log(`Knowledge graph build complete. Processed ${processedFiles.length} files.`);
+    log.debug(`Knowledge graph build complete. Processed ${processedFiles.length} files.`);
     return { processedFiles, notesCreated, notesModified, hadError };
 }
 
 export async function buildGraph(sourceDir: string): Promise<void> {
-    console.log(`[buildGraph] Starting build for directory: ${sourceDir}`);
+    buildLog.debug(`Starting build for directory: ${sourceDir}`);
 
     // Load current state
     const state = loadState();
     const previouslyProcessedCount = Object.keys(state.processedFiles).length;
-    console.log(`[buildGraph] State loaded. Previously processed: ${previouslyProcessedCount} files`);
+    buildLog.debug(`State loaded. Previously processed: ${previouslyProcessedCount} files`);
 
     // Get files that need processing (new or changed)
     let filesToProcess = getFilesToProcess(sourceDir, state);
@@ -468,7 +473,7 @@ export async function buildGraph(sourceDir: string): Promise<void> {
                 const content = fs.readFileSync(filePath, 'utf-8');
                 if (!content.startsWith('---')) return false;
                 if (hasNoiseLabels(content)) {
-                    console.log(`[buildGraph] Skipping noise email: ${path.basename(filePath)}`);
+                    buildLog.debug(`Skipping noise email: ${path.basename(filePath)}`);
                     markFileAsProcessed(filePath, state);
                     return false;
                 }
@@ -481,7 +486,7 @@ export async function buildGraph(sourceDir: string): Promise<void> {
     }
 
     if (filesToProcess.length === 0) {
-        console.log(`[buildGraph] No new or changed files to process in ${path.basename(sourceDir)}`);
+        buildLog.debug(`No new or changed files to process in ${path.basename(sourceDir)}`);
         return;
     }
 
@@ -493,19 +498,19 @@ export async function buildGraph(sourceDir: string): Promise<void> {
  * Voice memos are now created directly in the knowledge directory by the UI.
  */
 async function processVoiceMemosForKnowledge(): Promise<boolean> {
-    console.log(`[GraphBuilder] Starting voice memo processing...`);
+    log.debug(`Starting voice memo processing...`);
     const state = loadState();
 
     // Get unprocessed voice memos from knowledge/Voice Memos/
     const unprocessedFiles = getUnprocessedVoiceMemos(state);
 
     if (unprocessedFiles.length === 0) {
-        console.log(`[GraphBuilder] No unprocessed voice memos found`);
+        log.debug(`No unprocessed voice memos found`);
         return false;
     }
 
-    console.log(`[GraphBuilder] Processing ${unprocessedFiles.length} voice memo transcripts for entity extraction...`);
-    console.log(`[GraphBuilder] Files to process: ${unprocessedFiles.map(f => path.basename(f)).join(', ')}`);
+    log.debug(`Processing ${unprocessedFiles.length} voice memo transcripts for entity extraction...`);
+    log.debug(`Files to process: ${unprocessedFiles.map(f => path.basename(f)).join(', ')}`);
 
     const run = await serviceLogger.startRun({
         service: 'voice_memo',
@@ -557,11 +562,11 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
 
         try {
             // Build knowledge index
-            console.log(`[GraphBuilder] Building knowledge index for batch ${batchNumber}...`);
+            log.debug(`Building knowledge index for batch ${batchNumber}...`);
             const index = buildKnowledgeIndex();
             const indexForPrompt = formatIndexForPrompt(index);
 
-            console.log(`[GraphBuilder] Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
+            log.debug(`Processing batch ${batchNumber}/${totalBatches} (${batch.length} files)...`);
             await serviceLogger.log({
                 type: 'progress',
                 service: run.service,
@@ -574,7 +579,7 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
                 details: { filesInBatch: batch.length },
             });
             const batchResult = await createNotesFromBatch(batch, batchNumber, indexForPrompt);
-            console.log(`[GraphBuilder] Batch ${batchNumber}/${totalBatches} complete`);
+            log.debug(`Batch ${batchNumber}/${totalBatches} complete`);
 
             for (const note of batchResult.notesCreated) {
                 notesCreated.add(note);
@@ -595,11 +600,11 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
             try {
                 await commitAll('Knowledge update', 'Rowboat');
             } catch (err) {
-                console.error(`[GraphBuilder] Failed to commit version history:`, err);
+                log.error(`Failed to commit version history:`, err);
             }
         } catch (error) {
             hadError = true;
-            console.error(`[GraphBuilder] Error processing batch ${batchNumber}:`, error);
+            log.error(`Error processing batch ${batchNumber}:`, error);
             await serviceLogger.log({
                 type: 'error',
                 service: run.service,
@@ -638,7 +643,7 @@ async function processVoiceMemosForKnowledge(): Promise<boolean> {
  * Process all configured source directories
  */
 export async function processAllSources(): Promise<void> {
-    console.log('[GraphBuilder] Checking for new content in all sources...');
+    log.debug('Checking for new content in all sources...');
 
 
     let anyFilesProcessed = false;
@@ -650,7 +655,7 @@ export async function processAllSources(): Promise<void> {
             anyFilesProcessed = true;
         }
     } catch (error) {
-        console.error('[GraphBuilder] Error processing voice memos:', error);
+        log.error('Error processing voice memos:', error);
     }
 
     const state = loadState();
@@ -677,7 +682,7 @@ export async function processAllSources(): Promise<void> {
                         const content = fs.readFileSync(filePath, 'utf-8');
                         if (!content.startsWith('---')) return false;
                         if (hasNoiseLabels(content)) {
-                            console.log(`[GraphBuilder] Skipping noise email: ${path.basename(filePath)}`);
+                            log.debug(`Skipping noise email: ${path.basename(filePath)}`);
                             markFileAsProcessed(filePath, state);
                             return false;
                         }
@@ -690,13 +695,13 @@ export async function processAllSources(): Promise<void> {
             }
 
             if (filesToProcess.length > 0) {
-                console.log(`[GraphBuilder] Found ${filesToProcess.length} new/changed files in ${folder}`);
+                log.debug(`Found ${filesToProcess.length} new/changed files in ${folder}`);
                 folderChanges.push({ folder, sourceDir, files: filesToProcess });
                 countsByFolder[folder] = filesToProcess.length;
                 allFiles.push(...filesToProcess);
             }
         } catch (error) {
-            console.error(`[GraphBuilder] Error processing ${folder}:`, error);
+            log.error(`Error processing ${folder}:`, error);
             // Continue with other folders even if one fails
         }
     }
@@ -759,9 +764,9 @@ export async function processAllSources(): Promise<void> {
     }
 
     if (!anyFilesProcessed) {
-        console.log('[GraphBuilder] No new content to process');
+        log.debug('No new content to process');
     } else {
-        console.log('[GraphBuilder] Completed processing all sources');
+        log.debug('Completed processing all sources');
     }
 }
 
@@ -769,9 +774,9 @@ export async function processAllSources(): Promise<void> {
  * Main entry point - runs as independent service monitoring all source folders
  */
 export async function init() {
-    console.log('[GraphBuilder] Starting Knowledge Graph Builder Service...');
-    console.log(`[GraphBuilder] Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, knowledge/Voice Memos`);
-    console.log(`[GraphBuilder] Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
+    log.debug('Starting Knowledge Graph Builder Service...');
+    log.debug(`Monitoring folders: ${SOURCE_FOLDERS.join(', ')}, knowledge/Voice Memos`);
+    log.debug(`Will check for new content every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
     await processAllSources();
@@ -783,7 +788,7 @@ export async function init() {
         try {
             await processAllSources();
         } catch (error) {
-            console.error('[GraphBuilder] Error in main loop:', error);
+            log.error('Error in main loop:', error);
         }
     }
 }
@@ -793,7 +798,7 @@ export async function init() {
  * Useful for debugging or when you want to rebuild everything from scratch
  */
 export function resetGraphState(): void {
-    console.log('Resetting knowledge graph state...');
+    log.debug('Resetting knowledge graph state...');
     resetState();
-    console.log('State reset complete. All files will be reprocessed on next build.');
+    log.debug('State reset complete. All files will be reprocessed on next build.');
 }

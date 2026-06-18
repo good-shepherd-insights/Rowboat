@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('LabelingState');
+
 
 const STATE_FILE = path.join(WorkDir, 'labeling_state.json');
 
@@ -14,7 +18,7 @@ export function loadLabelingState(): LabelingState {
         try {
             return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
         } catch (error) {
-            console.error('Error loading labeling state:', error);
+            log.error('Error loading labeling state:', error);
         }
     }
 
@@ -28,7 +32,7 @@ export function saveLabelingState(state: LabelingState): void {
     try {
         fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     } catch (error) {
-        console.error('Error saving labeling state:', error);
+        log.error('Error saving labeling state:', error);
         throw error;
     }
 }

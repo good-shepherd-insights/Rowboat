@@ -7,6 +7,10 @@ import { getProviderConfig } from '../auth/providers.js';
 import * as oauthClient from '../auth/oauth-client.js';
 import type { Configuration } from '../auth/oauth-client.js';
 import { OAuthTokens } from '../auth/types.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Fireflies');
+
 
 const FIREFLIES_MCP_URL = 'https://api.fireflies.ai/mcp';
 
@@ -48,14 +52,14 @@ export class FirefliesClientFactory {
         if (oauthClient.isTokenExpired(tokens)) {
             // Token expired, try to refresh
             if (!tokens.refresh_token) {
-                console.log("[Fireflies] Token expired and no refresh token available.");
+                log.debug("Token expired and no refresh token available.");
                 await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Missing refresh token. Please reconnect.' });
                 this.clearCache();
                 return null;
             }
 
             try {
-                console.log(`[Fireflies] Token expired, refreshing access token...`);
+                log.debug(`Token expired, refreshing access token...`);
                 const existingScopes = tokens.scopes;
                 const refreshedTokens = await oauthClient.refreshTokens(
                     this.cache.config,
@@ -73,12 +77,12 @@ export class FirefliesClientFactory {
                 }
                 
                 this.cache.client = await this.createMcpClient(refreshedTokens);
-                console.log(`[Fireflies] Token refreshed successfully`);
+                log.debug(`Token refreshed successfully`);
                 return this.cache.client;
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'Failed to refresh token for Fireflies';
                 await oauthRepo.upsert(this.PROVIDER_NAME, { error: message });
-                console.error("[Fireflies] Failed to refresh token:", error);
+                log.error("Failed to refresh token:", error);
                 this.clearCache();
                 return null;
             }
@@ -90,7 +94,7 @@ export class FirefliesClientFactory {
         }
 
         // Create new client with current tokens
-        console.log(`[Fireflies] Creating new MCP client instance`);
+        log.debug(`Creating new MCP client instance`);
         this.cache.tokens = tokens;
         
         // Close existing client if any
@@ -115,7 +119,7 @@ export class FirefliesClientFactory {
      * Clear cache (useful for testing or when credentials are revoked)
      */
     static async clearCache(): Promise<void> {
-        console.log(`[Fireflies] Clearing auth cache`);
+        log.debug(`Clearing auth cache`);
         
         if (this.cache.client) {
             await this.cache.client.close().catch(() => {});
@@ -134,13 +138,13 @@ export class FirefliesClientFactory {
             return; // Already initialized
         }
 
-        console.log(`[Fireflies] Initializing OAuth configuration...`);
+        log.debug(`Initializing OAuth configuration...`);
         const providerConfig = await getProviderConfig(this.PROVIDER_NAME);
 
         if (providerConfig.discovery.mode === 'issuer') {
             if (providerConfig.client.mode === 'static') {
                 // Discover endpoints, use static client ID
-                console.log(`[Fireflies] Discovery mode: issuer with static client ID`);
+                log.debug(`Discovery mode: issuer with static client ID`);
                 const clientId = providerConfig.client.clientId;
                 if (!clientId) {
                     throw new Error('Fireflies client ID not configured.');
@@ -151,7 +155,7 @@ export class FirefliesClientFactory {
                 );
             } else {
                 // DCR mode - need existing registration
-                console.log(`[Fireflies] Discovery mode: issuer with DCR`);
+                log.debug(`Discovery mode: issuer with DCR`);
                 const clientRepo = container.resolve<IClientRegistrationRepo>('clientRegistrationRepo');
                 const existingRegistration = await clientRepo.getClientRegistration(this.PROVIDER_NAME);
                 
@@ -170,7 +174,7 @@ export class FirefliesClientFactory {
                 throw new Error('DCR requires discovery mode "issuer", not "static"');
             }
             
-            console.log(`[Fireflies] Using static endpoints (no discovery)`);
+            log.debug(`Using static endpoints (no discovery)`);
             const clientId = providerConfig.client.clientId;
             if (!clientId) {
                 throw new Error('Fireflies client ID not configured.');
@@ -183,7 +187,7 @@ export class FirefliesClientFactory {
             );
         }
 
-        console.log(`[Fireflies] OAuth configuration initialized`);
+        log.debug(`OAuth configuration initialized`);
     }
 
     /**
@@ -207,7 +211,7 @@ export class FirefliesClientFactory {
         });
 
         await client.connect(transport);
-        console.log(`[Fireflies] MCP client connected`);
+        log.debug(`MCP client connected`);
         
         return client;
     }

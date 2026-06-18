@@ -2,6 +2,10 @@ import { BrowserWindow } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { WorkDir } from "@x/core/dist/config/config.js";
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('deeplink');
+
 
 export const DEEP_LINK_SCHEME = "rowboat";
 const URL_PREFIX = `${DEEP_LINK_SCHEME}://`;
@@ -102,7 +106,7 @@ async function handleTakeMeetingNotes(eventId: string, openMeeting: boolean): Pr
         const raw = await fs.readFile(filePath, "utf-8");
         event = JSON.parse(raw);
     } catch (err) {
-        console.error(`[deeplink] take-meeting-notes: failed to read ${filePath}`, err);
+        log.error(`take-meeting-notes: failed to read ${filePath}`, err);
         return;
     }
 

@@ -3,6 +3,10 @@ import type { BrowserControlAction, BrowserControlInput, BrowserControlResult, S
 import { ensureLoaded, matchSkillsForUrl } from '@x/core/dist/application/browser-skills/index.js';
 import { browserViewManager } from './view.js';
 import { normalizeNavigationTarget } from './navigation.js';
+import { rootLogger } from '@x/shared/dist/logger.js';
+
+const log = rootLogger.child('browser-control');
+
 
 async function getSuggestedSkills(url: string | undefined): Promise<SuggestedBrowserSkill[] | undefined> {
   if (!url) return undefined;
@@ -14,7 +18,7 @@ async function getSuggestedSkills(url: string | undefined): Promise<SuggestedBro
       return matched.map((e) => ({ id: e.id, title: e.title, path: e.path }));
     }
   } catch (err) {
-    console.warn('[browser-control] suggestedSkills lookup failed:', err);
+    log.warn('suggestedSkills lookup failed:', err);
   }
   return undefined;
 }

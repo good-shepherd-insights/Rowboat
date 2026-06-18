@@ -17,6 +17,10 @@ import { capture as analyticsCapture, identify as analyticsIdentify, reset as an
 import { isSignedIn } from '@x/core/dist/account/account.js';
 import { getWebappUrl } from '@x/core/dist/config/remote-config.js';
 import { claimTokensViaBackend } from '@x/core/dist/auth/google-backend-oauth.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('OAuth');
+
 
 function buildRedirectUri(port: number): string {
   return `http://localhost:${port}/oauth/callback`;
@@ -84,7 +88,7 @@ function cancelActiveFlow(reason: string = 'cancelled'): void {
     return;
   }
 
-  console.log(`[OAuth] Cancelling active flow for ${activeFlow.provider}: ${reason}`);
+  log.debug(`Cancelling active flow for ${activeFlow.provider}: ${reason}`);
 
   clearTimeout(activeFlow.cleanupTimeout);
   activeFlow.server.close();
@@ -145,7 +149,7 @@ async function getProviderConfiguration(
   if (config.discovery.mode === 'issuer') {
     if (config.client.mode === 'static') {
       // Discover endpoints, use static client ID
-      console.log(`[OAuth] ${provider}: Discovery from issuer with static client ID`);
+      log.debug(`${provider}: Discovery from issuer with static client ID`);
       const { clientId, clientSecret } = await resolveClientCredentials();
       return await oauthClient.discoverConfiguration(
         config.discovery.issuer,
@@ -154,12 +158,12 @@ async function getProviderConfiguration(
       );
     } else {
       // DCR mode - check for existing registration or register new
-      console.log(`[OAuth] ${provider}: Discovery from issuer with DCR`);
+      log.debug(`${provider}: Discovery from issuer with DCR`);
       const clientRepo = getClientRegistrationRepo();
       const existingRegistration = await clientRepo.getClientRegistration(provider);
 
       if (existingRegistration) {
-        console.log(`[OAuth] ${provider}: Using existing DCR registration`);
+        log.debug(`${provider}: Using existing DCR registration`);
         return await oauthClient.discoverConfiguration(
           config.discovery.issuer,
           existingRegistration.client_id
@@ -179,7 +183,7 @@ async function getProviderConfiguration(
         ? parseInt(new URL(redirectUri).port, 10)
         : DEFAULT_CALLBACK_PORT;
       await clientRepo.saveClientRegistration(provider, registration, boundPort);
-      console.log(`[OAuth] ${provider}: DCR registration saved (port ${boundPort})`);
+      log.debug(`${provider}: DCR registration saved (port ${boundPort})`);
 
       return oauthConfig;
     }
@@ -189,7 +193,7 @@ async function getProviderConfiguration(
       throw new Error('DCR requires discovery mode "issuer", not "static"');
     }
 
-    console.log(`[OAuth] ${provider}: Using static endpoints (no discovery)`);
+    log.debug(`${provider}: Using static endpoints (no discovery)`);
     const { clientId, clientSecret } = await resolveClientCredentials();
     return oauthClient.createStaticConfiguration(
       config.discovery.authorizationEndpoint,
@@ -223,10 +227,10 @@ export async function resolveStartPort(
     // Probe — fixed-port (no fallback) so we know whether the exact registered port is free
     const probe = await createAuthServer(registeredPort, () => { /* probe */ });
     probe.server.close();
-    console.log(`[OAuth] ${provider}: registered port ${registeredPort} still available`);
+    log.debug(`${provider}: registered port ${registeredPort} still available`);
     return registeredPort;
   } catch {
-    console.log(`[OAuth] ${provider}: registered port ${registeredPort} blocked, clearing DCR registration`);
+    log.debug(`${provider}: registered port ${registeredPort} blocked, clearing DCR registration`);
     await clientRepo.clearClientRegistration(provider);
     return DEFAULT_CALLBACK_PORT;
   }
@@ -237,7 +241,7 @@ export async function resolveStartPort(
  */
 export async function connectProvider(provider: string, credentials?: { clientId: string; clientSecret: string }): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log(`[OAuth] Starting connection flow for ${provider}...`);
+    log.debug(`Starting connection flow for ${provider}...`);
 
     // Cancel any existing flow before starting a new one
     cancelActiveFlow('new_flow_started');
@@ -254,10 +258,10 @@ export async function connectProvider(provider: string, credentials?: { clientId
           try {
             const webappUrl = await getWebappUrl();
             await shell.openExternal(`${webappUrl}/oauth/google/start`);
-            console.log('[OAuth] Started rowboat-mode Google connect (browser opened to webapp)');
+            log.debug('Started rowboat-mode Google connect (browser opened to webapp)');
             return { success: true };
           } catch (error) {
-            console.error('[OAuth] Failed to start rowboat-mode Google connect:', error);
+            log.error('Failed to start rowboat-mode Google connect:', error);
             return {
               success: false,
               error: error instanceof Error ? error.message : 'Failed to open browser',
@@ -306,7 +310,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
 
         try {
           // Use full callback URL (includes iss, scope, etc.) so openid-client validation succeeds
-          console.log(`[OAuth] Exchanging authorization code for tokens (${provider})...`);
+          log.debug(`Exchanging authorization code for tokens (${provider})...`);
           const tokens = await oauthClient.exchangeCodeForTokens(
             flow.config,
             callbackUrl,
@@ -318,7 +322,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
           // that reaches this token exchange (rowboat path returns above
           // before any local server runs); stamp mode: 'byok' so a future
           // refresh / reconnect can't get confused with a rowboat entry.
-          console.log(`[OAuth] Token exchange successful for ${provider}`);
+          log.debug(`Token exchange successful for ${provider}`);
           await oauthRepo.upsert(provider, {
             tokens,
             ...(credentials ? { clientId: credentials.clientId, clientSecret: credentials.clientSecret } : {}),
@@ -354,7 +358,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
                 });
               }
             } catch (meError) {
-              console.error('[OAuth] Failed to initialize user via /v1/me:', meError);
+              log.error('Failed to initialize user via /v1/me:', meError);
             }
           }
 
@@ -365,13 +369,13 @@ export async function connectProvider(provider: string, credentials?: { clientId
             ...(signedInUserId ? { userId: signedInUserId } : {}),
           });
         } catch (error) {
-          console.error('OAuth token exchange failed:', error);
+          log.error('OAuth token exchange failed:', error);
           // Log cause chain for debugging (e.g. OAUTH_INVALID_RESPONSE -> OperationProcessingError)
           let cause: unknown = error;
           while (cause != null && typeof cause === 'object' && 'cause' in cause) {
             cause = (cause as { cause?: unknown }).cause;
             if (cause != null) {
-              console.error('[OAuth] Caused by:', cause);
+              log.error('Caused by:', cause);
             }
           }
           const errorMessage = getOAuthErrorMessage(error);
@@ -402,7 +406,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
       // for the old port — clear it so getProviderConfiguration re-registers
       // with the actual bound port.
       if (!isStaticClient && boundPort !== startPort) {
-        console.log(`[OAuth] ${provider}: bound port ${boundPort} differs from start port ${startPort}, clearing stale DCR registration`);
+        log.debug(`${provider}: bound port ${boundPort} differs from start port ${startPort}, clearing stale DCR registration`);
         await getClientRegistrationRepo().clearClientRegistration(provider);
       }
 
@@ -425,7 +429,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
       // Set timeout to clean up abandoned flows (2 minutes)
       const cleanupTimeout = setTimeout(() => {
         if (activeFlow?.state === state) {
-          console.log(`[OAuth] Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
+          log.debug(`Cleaning up abandoned OAuth flow for ${provider} (timeout)`);
           cancelActiveFlow('timed_out');
         }
       }, 2 * 60 * 1000);
@@ -451,7 +455,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
       throw setupError;
     }
   } catch (error) {
-    console.error('OAuth connection failed:', error);
+    log.error('OAuth connection failed:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -468,7 +472,7 @@ export async function connectProvider(provider: string, credentials?: { clientId
  */
 export async function completeRowboatGoogleConnect(state: string): Promise<void> {
   try {
-    console.log('[OAuth] Claiming rowboat-mode Google tokens...');
+    log.debug('Claiming rowboat-mode Google tokens...');
     const tokens = await claimTokensViaBackend(state);
     const oauthRepo = getOAuthRepo();
     await oauthRepo.upsert('google', {
@@ -482,9 +486,9 @@ export async function completeRowboatGoogleConnect(state: string): Promise<void>
     triggerGmailSync();
     triggerCalendarSync();
     emitOAuthEvent({ provider: 'google', success: true });
-    console.log('[OAuth] Rowboat-mode Google connect complete');
+    log.debug('Rowboat-mode Google connect complete');
   } catch (error) {
-    console.error('[OAuth] Failed to complete rowboat-mode Google connect:', error);
+    log.error('Failed to complete rowboat-mode Google connect:', error);
     emitOAuthEvent({
       provider: 'google',
       success: false,
@@ -510,10 +514,10 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
           const revokeUrl = `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(connection.tokens.access_token)}`;
           const res = await fetch(revokeUrl, { method: 'POST', signal: AbortSignal.timeout(5000) });
           if (!res.ok) {
-            console.warn(`[OAuth] Google revoke returned ${res.status}; continuing with local disconnect`);
+            log.warn(`Google revoke returned ${res.status}; continuing with local disconnect`);
           }
         } catch (error) {
-          console.warn('[OAuth] Google revoke failed; continuing with local disconnect:', error);
+          log.warn('Google revoke failed; continuing with local disconnect:', error);
         }
       }
     }
@@ -527,7 +531,7 @@ export async function disconnectProvider(provider: string): Promise<{ success: b
     emitOAuthEvent({ provider, success: false });
     return { success: true };
   } catch (error) {
-    console.error('OAuth disconnect failed:', error);
+    log.error('OAuth disconnect failed:', error);
     return { success: false };
   }
 }
@@ -574,7 +578,7 @@ export async function disconnectGoogleIfScopesStale(): Promise<void> {
       return;
     }
 
-    console.log(
+    log.debug(
       `[OAuth] Google grant is missing current scopes [${missingScopes.join(', ')}]; ` +
       'invalidating it so the user is prompted to reconnect with the new scopes.'
     );
@@ -585,10 +589,10 @@ export async function disconnectGoogleIfScopesStale(): Promise<void> {
         const revokeUrl = `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(connection.tokens.access_token)}`;
         const res = await fetch(revokeUrl, { method: 'POST', signal: AbortSignal.timeout(5000) });
         if (!res.ok) {
-          console.warn(`[OAuth] Google revoke returned ${res.status}; continuing with local invalidation`);
+          log.warn(`Google revoke returned ${res.status}; continuing with local invalidation`);
         }
       } catch (error) {
-        console.warn('[OAuth] Google revoke failed; continuing with local invalidation:', error);
+        log.warn('Google revoke failed; continuing with local invalidation:', error);
       }
     }
 
@@ -603,7 +607,7 @@ export async function disconnectGoogleIfScopesStale(): Promise<void> {
     // mount also re-reads, so the prompt shows even if no window is up yet.
     emitOAuthEvent({ provider: 'google', success: false });
   } catch (error) {
-    console.error('[OAuth] Google scope migration check failed:', error);
+    log.error('Google scope migration check failed:', error);
   }
 }
 
@@ -640,14 +644,14 @@ export async function getAccessToken(provider: string): Promise<string | null> {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Token refresh failed';
         await oauthRepo.upsert(provider, { error: message });
-        console.error('Token refresh failed:', error);
+        log.error('Token refresh failed:', error);
         return null;
       }
     }
 
     return tokens.access_token;
   } catch (error) {
-    console.error('Get access token failed:', error);
+    log.error('Get access token failed:', error);
     return null;
   }
 }

@@ -11,6 +11,9 @@ import {
     TransientRefreshError,
     refreshTokensViaBackend,
 } from '../auth/google-backend-oauth.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('OAuth');
 
 type Mode = 'byok' | 'rowboat';
 
@@ -111,7 +114,7 @@ export class GoogleClientFactory {
             try {
                 await this.initializeConfigCache();
             } catch (error) {
-                console.error('[OAuth] Failed to initialize Google OAuth configuration:', error);
+                log.error('Failed to initialize Google OAuth configuration:', error);
                 this.clearCache();
                 return null;
             }
@@ -125,7 +128,7 @@ export class GoogleClientFactory {
         // expiry — keeps long-running calls from racing the boundary.
         if (oauthClient.isTokenExpired(tokens)) {
             if (!tokens.refresh_token) {
-                console.log('[OAuth] Google token expired and no refresh token available.');
+                log.debug('Google token expired and no refresh token available.');
                 await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Missing refresh token. Please reconnect.' });
                 this.clearCache();
                 return null;
@@ -147,7 +150,7 @@ export class GoogleClientFactory {
 
         try {
             const secsSinceExpiry = Math.floor(Date.now() / 1000) - tokens.expires_at;
-            console.log(`[OAuth] Google token expired ${secsSinceExpiry}s ago, refreshing via ${mode}...`);
+            log.debug(`Google token expired ${secsSinceExpiry}s ago, refreshing via ${mode}...`);
             const existingScopes = tokens.scopes;
 
             let refreshedTokens: OAuthTokens;
@@ -163,11 +166,11 @@ export class GoogleClientFactory {
 
             await oauthRepo.upsert(this.PROVIDER_NAME, { tokens: refreshedTokens, error: null });
             const ttl = refreshedTokens.expires_at - Math.floor(Date.now() / 1000);
-            console.log(`[OAuth] Google token refreshed successfully (mode=${mode}, new expires_at=${refreshedTokens.expires_at}, ttl=${ttl}s)`);
+            log.debug(`Google token refreshed successfully (mode=${mode}, new expires_at=${refreshedTokens.expires_at}, ttl=${ttl}s)`);
             return this.buildAndCacheClient(refreshedTokens, mode);
         } catch (error) {
             if (error instanceof ReconnectRequiredError) {
-                console.log('[OAuth] Reconnect required for Google');
+                log.debug('Reconnect required for Google');
                 await oauthRepo.upsert(this.PROVIDER_NAME, { error: 'Reconnect Google' });
                 this.clearCache();
                 return null;
@@ -177,18 +180,18 @@ export class GoogleClientFactory {
                 // stored tokens + cache alone, log, and let the next sync tick
                 // retry. Writing an `error` here would stick "Needs reconnect"
                 // in the UI for a problem the user can't fix by reconnecting.
-                console.warn(`[OAuth] Transient Google refresh failure (status=${error.status}): ${error.message} — will retry on next tick`);
+                log.warn(`Transient Google refresh failure (status=${error.status}): ${error.message} — will retry on next tick`);
                 return null;
             }
             const message = error instanceof Error ? error.message : 'Failed to refresh token for Google';
             await oauthRepo.upsert(this.PROVIDER_NAME, { error: message });
-            console.error('[OAuth] Failed to refresh token for Google:', error);
+            log.error('Failed to refresh token for Google:', error);
             // Walk cause chain so we can see e.g. `Not signed into Rowboat`
             // showing up under a generic `fetch failed` outer error.
             let cause: unknown = error;
             while (cause != null && typeof cause === 'object' && 'cause' in cause) {
                 cause = (cause as { cause?: unknown }).cause;
-                if (cause != null) console.error('[OAuth] Caused by:', cause);
+                if (cause != null) log.error('Caused by:', cause);
             }
             this.clearCache();
             return null;
@@ -257,7 +260,7 @@ export class GoogleClientFactory {
      * Clear cache (useful for testing or when credentials are revoked)
      */
     static clearCache(): void {
-        console.log('[OAuth] Clearing Google auth cache');
+        log.debug('Clearing Google auth cache');
         this.cache.mode = null;
         this.cache.config = null;
         this.cache.client = null;
@@ -280,13 +283,13 @@ export class GoogleClientFactory {
             this.clearCache();
         }
 
-        console.log('[OAuth] Initializing Google OAuth configuration...');
+        log.debug('Initializing Google OAuth configuration...');
         const providerConfig = await getProviderConfig(this.PROVIDER_NAME);
 
         if (providerConfig.discovery.mode === 'issuer') {
             if (providerConfig.client.mode === 'static') {
                 // Discover endpoints, use static client ID
-                console.log('[OAuth] Discovery mode: issuer with static client ID');
+                log.debug('Discovery mode: issuer with static client ID');
                 this.cache.config = await oauthClient.discoverConfiguration(
                     providerConfig.discovery.issuer,
                     clientId,
@@ -294,7 +297,7 @@ export class GoogleClientFactory {
                 );
             } else {
                 // DCR mode - need existing registration
-                console.log('[OAuth] Discovery mode: issuer with DCR');
+                log.debug('Discovery mode: issuer with DCR');
                 const clientRepo = container.resolve<IClientRegistrationRepo>('clientRegistrationRepo');
                 const existingRegistration = await clientRepo.getClientRegistration(this.PROVIDER_NAME);
 
@@ -313,7 +316,7 @@ export class GoogleClientFactory {
                 throw new Error('DCR requires discovery mode "issuer", not "static"');
             }
 
-            console.log('[OAuth] Using static endpoints (no discovery)');
+            log.debug('Using static endpoints (no discovery)');
             this.cache.config = oauthClient.createStaticConfiguration(
                 providerConfig.discovery.authorizationEndpoint,
                 providerConfig.discovery.tokenEndpoint,
@@ -325,7 +328,7 @@ export class GoogleClientFactory {
 
         this.cache.clientId = clientId;
         this.cache.clientSecret = clientSecret ?? null;
-        console.log('[OAuth] Google OAuth configuration initialized');
+        log.debug('Google OAuth configuration initialized');
     }
 
     /** BYOK OAuth2Client — has client_id + secret + refresh_token. */

@@ -6,6 +6,10 @@ import z from "zod";
 import { Agent } from "@x/shared/dist/agent.js";
 import { stringify } from "yaml";
 import { parseFrontmatter } from "../application/lib/parse-frontmatter.js";
+import { rootLogger } from '@x/shared/dist/logger.js';
+
+const log = rootLogger.child('Agents');
+
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const UpdateAgentSchema = Agent.omit({ name: true });
@@ -39,7 +43,7 @@ export class FSAgentsRepo implements IAgentsRepo {
                     name: file.replace(/\.md$/, ""),
                 });
             } catch (error) {
-                console.error(`Error parsing agent ${file}: ${error instanceof Error ? error.message : String(error)}`);
+                log.error(`Error parsing agent ${file}: ${error instanceof Error ? error.message : String(error)}`);
                 continue;
             }
         }

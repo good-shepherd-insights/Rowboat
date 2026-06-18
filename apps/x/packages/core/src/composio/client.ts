@@ -21,6 +21,10 @@ import {
 import { isSignedIn } from "../account/account.js";
 import { getAccessToken } from "../auth/tokens.js";
 import { API_URL } from "../config/env.js";
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Composio');
+
 
 const COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3';
 const CONFIG_FILE = path.join(WorkDir, 'config', 'composio.json');
@@ -63,7 +67,7 @@ function loadConfig(): ComposioConfig {
             return ZComposioConfig.parse(JSON.parse(data));
         }
     } catch (error) {
-        console.error('[Composio] Failed to load config:', error);
+        log.error('Failed to load config:', error);
     }
     return {};
 }
@@ -117,7 +121,7 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
     const baseURL = await getBaseUrl();
     const url = new URL(`${baseURL}${path}`);
 
-    console.log(`[Composio] ${options.method || 'GET'} ${url}`);
+    log.debug(`${options.method || 'GET'} ${url}`);
     const startTime = Date.now();
 
     try {
@@ -133,13 +137,13 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
         });
 
         const duration = Date.now() - startTime;
-        console.log(`[Composio] Response in ${duration}ms`);
+        log.debug(`Response in ${duration}ms`);
 
         const contentType = response.headers.get('content-type') || '';
         const rawText = await response.text();
 
         if (!response.ok || !contentType.includes('application/json')) {
-            console.error(`[Composio] Error response:`, {
+            log.error(`Error response:`, {
                 status: response.status,
                 statusText: response.statusText,
                 contentType,
@@ -178,7 +182,7 @@ export async function composioApiCall<T extends z.ZodTypeAny>(
 
         return schema.parse(data);
     } catch (error) {
-        console.error(`[Composio] Error:`, error);
+        log.error(`Error:`, error);
         throw error;
     }
 }

@@ -15,6 +15,9 @@ import {
     markRunProcessed,
     type AgentNotesState,
 } from './agent_notes_state.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('AgentNotes');
 
 const SYNC_INTERVAL_MS = 10 * 1000; // 10 seconds (for testing)
 const EMAIL_BATCH_SIZE = 5;
@@ -205,12 +208,12 @@ async function ensureUserEmail(): Promise<string | null> {
             const profile = await gmail.users.getProfile({ userId: 'me' });
             if (profile.data.emailAddress) {
                 updateUserEmail(profile.data.emailAddress);
-                console.log(`[AgentNotes] Auto-populated user email: ${profile.data.emailAddress}`);
+                log.debug(`Auto-populated user email: ${profile.data.emailAddress}`);
                 return profile.data.emailAddress;
             }
         }
     } catch (error) {
-        console.log('[AgentNotes] Could not fetch Gmail profile for user email:', error instanceof Error ? error.message : error);
+        log.debug('Could not fetch Gmail profile for user email:', error instanceof Error ? error.message : error);
     }
 
     return null;
@@ -319,7 +322,7 @@ async function processAgentNotes(): Promise<void> {
             },
         });
     } catch (error) {
-        console.error('[AgentNotes] Error processing:', error);
+        log.error('Error processing:', error);
         await serviceLogger.log({
             type: 'error',
             service: serviceRun.service,
@@ -343,8 +346,8 @@ async function processAgentNotes(): Promise<void> {
 // --- Entry point ---
 
 export async function init() {
-    console.log('[AgentNotes] Starting Agent Notes Service...');
-    console.log(`[AgentNotes] Will process every ${SYNC_INTERVAL_MS / 1000} seconds`);
+    log.debug('Starting Agent Notes Service...');
+    log.debug(`Will process every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
     await processAgentNotes();
@@ -355,7 +358,7 @@ export async function init() {
         try {
             await processAgentNotes();
         } catch (error) {
-            console.error('[AgentNotes] Error in main loop:', error);
+            log.error('Error in main loop:', error);
         }
     }
 }

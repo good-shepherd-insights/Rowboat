@@ -51,6 +51,12 @@ import {
   setMainWindowForDeepLinks,
 } from "./deeplink.js";
 import { disconnectGoogleIfScopesStale } from "./oauth-handler.js";
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Main');
+const analyticsLog = rootLogger.child('Analytics');
+const localSitesLog = rootLogger.child('LocalSites');
+
 
 // electron-squirrel-startup is Windows-only installer plumbing; on non-
 // Windows it's a no-op that returns false. Its top-level `require('app')`
@@ -71,7 +77,7 @@ if (started) app.quit();
 // Single-instance lock: route a second launch (e.g. clicking a rowboat:// link)
 // back into the existing process via the 'second-instance' event.
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
-  console.error('[Main] Another Rowboat instance is already running; exiting this process.');
+  log.error('Another Rowboat instance is already running; exiting this process.');
   app.quit();
   process.exit(0);
 }
@@ -130,7 +136,7 @@ function initializeExecutionEnvironment(): void {
     // Finder/launched GUI apps on macOS often start with a stripped PATH.
     process.env = { ...process.env, ...env };
   } catch (error) {
-    console.error('Failed to load shell environment', error);
+    log.error('Failed to load shell environment', error);
   }
 }
 initializeExecutionEnvironment();
@@ -139,12 +145,12 @@ initializeExecutionEnvironment();
 const preloadPath = app.isPackaged
   ? path.join(__dirname, "../preload/dist/preload.js")
   : path.join(__dirname, "../../../preload/dist/preload.js");
-console.log("preloadPath", preloadPath);
+log.debug("preloadPath", preloadPath);
 
 const rendererPath = app.isPackaged
   ? path.join(__dirname, "../renderer/dist") // Production
   : path.join(__dirname, "../../../renderer/dist"); // Development
-console.log("rendererPath", rendererPath);
+log.debug("rendererPath", rendererPath);
 
 // Register custom protocol for serving built renderer files in production
 // AND for serving local workspace files to the renderer (images, PDFs, video).
@@ -301,11 +307,11 @@ app.whenReady().then(async () => {
     execSync('agent-slack --version', { stdio: 'ignore', timeout: 5000 });
   } catch {
     try {
-      console.log('agent-slack not found, installing...');
+      log.debug('agent-slack not found, installing...');
       await execAsync('npm install -g agent-slack', { timeout: 60000 });
-      console.log('agent-slack installed successfully');
+      log.debug('agent-slack installed successfully');
     } catch (e) {
-      console.error('Failed to install agent-slack:', e);
+      log.error('Failed to install agent-slack:', e);
     }
   }
 
@@ -316,7 +322,7 @@ app.whenReady().then(async () => {
   // signed-in installs (and every cold start of v0.3.4+) get re-identified.
   // Otherwise main-process events stay anonymous until the user re-signs-in.
   identifyIfSignedIn().catch((error) => {
-    console.error('[Analytics] Failed to identify on startup:', error);
+    analyticsLog.error('Failed to identify on startup:', error);
   });
 
   registerBrowserControlService(new ElectronBrowserControlService());
@@ -402,7 +408,7 @@ app.whenReady().then(async () => {
 
   // start local sites server for iframe dashboards and other mini apps
   initLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to start:', error);
+    localSitesLog.error('Failed to start:', error);
   });
 
   app.on("activate", () => {
@@ -424,9 +430,9 @@ app.on("before-quit", () => {
   stopRunsWatcher();
   stopServicesWatcher();
   shutdownLocalSites().catch((error) => {
-    console.error('[LocalSites] Failed to shut down cleanly:', error);
+    localSitesLog.error('Failed to shut down cleanly:', error);
   });
   shutdownAnalytics().catch((error) => {
-    console.error('[Analytics] Failed to flush on quit:', error);
+    analyticsLog.error('Failed to flush on quit:', error);
   });
 });

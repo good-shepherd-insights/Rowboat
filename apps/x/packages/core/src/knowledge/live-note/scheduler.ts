@@ -1,10 +1,10 @@
-import { PrefixLogger } from '@x/shared';
+import { rootLogger } from '@x/shared';
 import * as workspace from '../../workspace/workspace.js';
 import { fetchLiveNote } from './fileops.js';
 import { runLiveNoteAgent } from './runner.js';
 import { backoffRemainingMs, dueTimedTrigger } from '../../schedule/utils.js';
 
-const log = new PrefixLogger('LiveNote:Scheduler');
+const log = rootLogger.child('LiveNote:Scheduler');
 const POLL_INTERVAL_MS = 15_000; // 15 seconds
 
 async function listKnowledgeMarkdownFiles(): Promise<string[]> {
@@ -57,14 +57,14 @@ async function processScheduledLiveNotes(): Promise<void> {
         const backoffMs = backoffRemainingMs(live.lastAttemptAt ?? null);
         if (backoffMs > 0) {
             backoffCount++;
-            log.log(`${relativePath} — skip (matched ${source}, backoff ${humanMs(backoffMs)} remaining)`);
+            log.debug(`${relativePath} — skip (matched ${source}, backoff ${humanMs(backoffMs)} remaining)`);
             continue;
         }
 
         firedCount++;
         log.log(`${relativePath} — firing (matched ${source})`);
         runLiveNoteAgent(relativePath, source).catch(err => {
-            log.log(`${relativePath} — fire error: ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`${relativePath} — fire error: ${err instanceof Error ? err.message : String(err)}`);
         });
     }
 
@@ -90,7 +90,7 @@ export async function init(): Promise<void> {
         try {
             await processScheduledLiveNotes();
         } catch (error) {
-            log.log(`tick error: ${error instanceof Error ? error.message : String(error)}`);
+            log.error(`tick error: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 }

@@ -2,6 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 import { WorkDir } from './config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('UserConfig');
+
 
 const USER_CONFIG_PATH = path.join(WorkDir, 'config', 'user.json');
 
@@ -21,7 +25,7 @@ export function loadUserConfig(): UserConfig | null {
             return UserConfig.parse(parsed);
         }
     } catch (error) {
-        console.error('[UserConfig] Error loading user config:', error);
+        log.error('Error loading user config:', error);
     }
     return null;
 }

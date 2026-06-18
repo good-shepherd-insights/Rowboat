@@ -1,4 +1,8 @@
 export const skill = String.raw`
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Presentations');
+
 # PDF Presentation Skill
 
 ## Theme Selection
@@ -158,7 +162,7 @@ const path = require('path');
     printBackground: true,
   });
   await browser.close();
-  console.log('Done: ~/Desktop/presentation.pdf');
+  log.debug('Done: ~/Desktop/presentation.pdf');
 })();
 \`\`\`
 

@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { WorkDir } from '../config/config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Analytics');
+
 
 const INSTALLATION_PATH = path.join(WorkDir, 'config', 'installation.json');
 
@@ -19,7 +23,7 @@ export function getInstallationId(): string {
       }
     }
   } catch (err) {
-    console.error('[Analytics] Failed to read installation.json:', err);
+    log.error('Failed to read installation.json:', err);
   }
 
   const id = randomUUID();
@@ -30,7 +34,7 @@ export function getInstallationId(): string {
     }
     fs.writeFileSync(INSTALLATION_PATH, JSON.stringify({ installationId: id }, null, 2));
   } catch (err) {
-    console.error('[Analytics] Failed to write installation.json:', err);
+    log.error('Failed to write installation.json:', err);
   }
   cached = id;
   return id;

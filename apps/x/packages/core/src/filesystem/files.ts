@@ -8,6 +8,10 @@ import { WorkDir } from '../config/config.js';
 import { withFileLock } from '../knowledge/file-lock.js';
 import { commitAll } from '../knowledge/version_history.js';
 import { rewriteWikiLinksForRenamedKnowledgeFile } from '../workspace/wiki-link-rewrite.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('VersionHistory');
+
 
 export type FileOperation = 'read' | 'list' | 'search' | 'write' | 'delete';
 
@@ -170,7 +174,7 @@ function scheduleKnowledgeCommit(filename: string): void {
   knowledgeCommitTimer = setTimeout(() => {
     knowledgeCommitTimer = null;
     commitAll(`Edit ${filename}`, 'You').catch(err => {
-      console.error('[VersionHistory] Failed to commit after edit:', err);
+      log.error('Failed to commit after edit:', err);
     });
   }, 3 * 60 * 1000);
 }
@@ -491,7 +495,7 @@ export async function rename(from: string, to: string, overwrite = false): Promi
     try {
       await rewriteWikiLinksForRenamedKnowledgeFile(WorkDir, source.workspaceRelPath, dest.workspaceRelPath);
     } catch (error) {
-      console.error('Failed to rewrite wiki backlinks after file rename:', error);
+      log.error('Failed to rewrite wiki backlinks after file rename:', error);
     }
   }
 

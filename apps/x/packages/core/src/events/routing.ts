@@ -1,12 +1,12 @@
 import { generateObject } from 'ai';
 import type { LanguageModel } from 'ai';
-import { events, PrefixLogger } from '@x/shared';
+import { events, rootLogger } from '@x/shared';
 import type { RowboatEvent } from '@x/shared/dist/events.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase, type UseCase } from '../analytics/use_case.js';
 import type { EventConsumerTarget } from './consumer.js';
 
-const log = new PrefixLogger('Events:Routing');
+const log = rootLogger.child('Events:Routing');
 
 const BATCH_SIZE = 20;
 
@@ -106,7 +106,7 @@ export async function routeBatch(
                 matched.add(id);
             }
         } catch (err) {
-            log.log(`event:${event.id} — Pass1 batch ${Math.floor(i / BATCH_SIZE)} failed: ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`event:${event.id} — Pass1 batch ${Math.floor(i / BATCH_SIZE)} failed: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 

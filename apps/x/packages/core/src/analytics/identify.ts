@@ -1,6 +1,10 @@
 import { isSignedIn } from '../account/account.js';
 import { getBillingInfo } from '../billing/billing.js';
 import { identify } from './posthog.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Analytics');
+
 
 /**
  * If the user has rowboat OAuth tokens, fetch their billing info and
@@ -18,6 +22,6 @@ export async function identifyIfSignedIn(): Promise<void> {
       status: billing.subscriptionStatus,
     });
   } catch (err) {
-    console.error('[Analytics] startup identify failed:', err);
+    log.error('startup identify failed:', err);
   }
 }

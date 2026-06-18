@@ -13,6 +13,9 @@ import {
     markFileAsLabeled,
     type LabelingState,
 } from './labeling_state.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('EmailLabeling');
 
 const SYNC_INTERVAL_MS = 15 * 1000; // 15 seconds
 const BATCH_SIZE = 15;
@@ -125,17 +128,17 @@ async function labelEmailBatch(
  * Process all unlabeled emails in batches
  */
 export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCURRENCY): Promise<void> {
-    console.log('[EmailLabeling] Checking for unlabeled emails...');
+    log.debug('Checking for unlabeled emails...');
 
     const state = loadLabelingState();
     const unlabeled = getUnlabeledEmails(state);
 
     if (unlabeled.length === 0) {
-        console.log('[EmailLabeling] No unlabeled emails found');
+        log.debug('No unlabeled emails found');
         return;
     }
 
-    console.log(`[EmailLabeling] Found ${unlabeled.length} unlabeled emails (concurrency: ${concurrency})`);
+    log.debug(`Found ${unlabeled.length} unlabeled emails (concurrency: ${concurrency})`);
 
     const run = await serviceLogger.startRun({
         service: 'email_labeling',
@@ -167,7 +170,7 @@ export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCU
                 const content = fs.readFileSync(filePath, 'utf-8');
                 files.push({ path: filePath, content });
             } catch (error) {
-                console.error(`[EmailLabeling] Error reading ${filePath}:`, error);
+                log.error(`Error reading ${filePath}:`, error);
             }
         }
         if (files.length > 0) {
@@ -186,7 +189,7 @@ export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCU
 
         const promises = chunk.map(async ({ batchNumber, files }) => {
             try {
-                console.log(`[EmailLabeling] Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`);
+                log.debug(`Processing batch ${batchNumber}/${totalBatches} (${files.length} files)`);
                 await serviceLogger.log({
                     type: 'progress',
                     service: run.service,
@@ -209,13 +212,13 @@ export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCU
                     }
                 }
 
-                console.log(`[EmailLabeling] Batch ${batchNumber}/${totalBatches} complete, ${result.filesEdited.size} files edited`);
+                log.debug(`Batch ${batchNumber}/${totalBatches} complete, ${result.filesEdited.size} files edited`);
                 return result.filesEdited.size;
             } catch (error) {
                 hadError = true;
                 failedBatches++;
                 const errorDetails = getErrorDetails(error);
-                console.error(`[EmailLabeling] Error processing batch ${batchNumber}:`, error);
+                log.error(`Error processing batch ${batchNumber}:`, error);
                 await serviceLogger.log({
                     type: 'error',
                     service: run.service,
@@ -256,15 +259,15 @@ export async function processUnlabeledEmails(concurrency: number = DEFAULT_CONCU
         },
     });
 
-    console.log(`[EmailLabeling] Done. ${totalEdited} emails labeled.`);
+    log.debug(`Done. ${totalEdited} emails labeled.`);
 }
 
 /**
  * Main entry point - runs as independent polling service
  */
 export async function init() {
-    console.log('[EmailLabeling] Starting Email Labeling Service...');
-    console.log(`[EmailLabeling] Will check for unlabeled emails every ${SYNC_INTERVAL_MS / 1000} seconds`);
+    log.debug('Starting Email Labeling Service...');
+    log.debug(`Will check for unlabeled emails every ${SYNC_INTERVAL_MS / 1000} seconds`);
 
     // Initial run
     await processUnlabeledEmails();
@@ -276,7 +279,7 @@ export async function init() {
         try {
             await processUnlabeledEmails();
         } catch (error) {
-            console.error('[EmailLabeling] Error in main loop:', error);
+            log.error('Error in main loop:', error);
         }
     }
 }

@@ -12,6 +12,10 @@ import { extractCommandNames } from "../application/lib/command-executor.js";
 import { addFileAccessGrant, addToSecurityConfig } from "../config/security.js";
 import { loadAgent } from "../agents/runtime.js";
 import { getDefaultModelAndProvider } from "../models/defaults.js";
+import { rootLogger } from '@x/shared/dist/logger.js';
+
+const log = rootLogger.child('Runs');
+
 
 export async function createRun(opts: z.infer<typeof CreateRunOptions>): Promise<z.infer<typeof Run>> {
     const repo = container.resolve<IRunsRepo>('runsRepo');
@@ -102,12 +106,12 @@ export async function stop(runId: string, force: boolean = false): Promise<void>
 
     if (force && abortRegistry.isAborted(runId)) {
         // Second click: aggressive cleanup — SIGKILL + force close MCP clients
-        console.log(`Force stopping run ${runId}`);
+        log.debug(`Force stopping run ${runId}`);
         abortRegistry.forceAbort(runId);
         await forceCloseAllMcpClients();
     } else {
         // First click: graceful — fires AbortSignal + SIGTERM
-        console.log(`Gracefully stopping run ${runId}`);
+        log.debug(`Gracefully stopping run ${runId}`);
         abortRegistry.abort(runId);
     }
     // Note: The run-stopped event is emitted by AgentRuntime.trigger() when it detects the abort.

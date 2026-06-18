@@ -11,6 +11,9 @@ import {
     SyncState,
     Document,
 } from './types.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('Granola');
 
 // --- Configuration ---
 
@@ -31,7 +34,7 @@ let wakeResolve: (() => void) | null = null;
 
 export function triggerSync(): void {
     if (wakeResolve) {
-        console.log('[Granola] Triggered - waking up immediately');
+        log.debug('Triggered - waking up immediately');
         wakeResolve();
         wakeResolve = null;
     }
@@ -65,7 +68,7 @@ interface SupabaseJson {
 function extractAccessToken(): string | null {
     try {
         if (!fs.existsSync(GRANOLA_CONFIG_PATH)) {
-            console.log('[Granola] supabase.json not found at:', GRANOLA_CONFIG_PATH);
+            log.debug('supabase.json not found at:', GRANOLA_CONFIG_PATH);
             return null;
         }
 
@@ -73,7 +76,7 @@ function extractAccessToken(): string | null {
         const supabaseJson: SupabaseJson = JSON.parse(content);
 
         if (!supabaseJson.workos_tokens) {
-            console.log('[Granola] workos_tokens not found in supabase.json');
+            log.debug('workos_tokens not found in supabase.json');
             return null;
         }
 
@@ -81,13 +84,13 @@ function extractAccessToken(): string | null {
         const tokens: WorkosTokens = JSON.parse(supabaseJson.workos_tokens);
         
         if (!tokens.access_token) {
-            console.log('[Granola] access_token not found in workos_tokens');
+            log.debug('access_token not found in workos_tokens');
             return null;
         }
 
         return tokens.access_token;
     } catch (error) {
-        console.error('[Granola] Error extracting access token:', error);
+        log.error('Error extracting access token:', error);
         return null;
     }
 }
@@ -119,10 +122,10 @@ async function callWithRateLimit<T>(
                 errorMessage.includes('rate limit')) {
 
                 retries++;
-                console.log(`[Granola] Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${delay/1000}s...`);
+                log.debug(`Rate limit hit for ${operationName}. Retry ${retries}/${MAX_RETRIES} in ${delay/1000}s...`);
 
                 if (retries >= MAX_RETRIES) {
-                    console.error(`[Granola] Max retries reached for ${operationName}. Skipping.`);
+                    log.error(`Max retries reached for ${operationName}. Skipping.`);
                     return null;
                 }
 
@@ -154,7 +157,7 @@ async function apiCall<T>(
     accessToken: string,
     body: Record<string, unknown> = {}
 ): Promise<T> {
-    console.log(`[Granola] API call: ${endpoint}`);
+    log.debug(`API call: ${endpoint}`);
     const response = await fetch(`${GRANOLA_API_BASE}${endpoint}`, {
         method: 'POST',
         headers: getHeaders(accessToken),
@@ -163,13 +166,13 @@ async function apiCall<T>(
 
     if (!response.ok) {
         const errorText = await response.text().catch(() => 'no body');
-        console.error(`[Granola] API error ${response.status}: ${response.statusText} - ${errorText.slice(0, 200)}`);
+        log.error(`API error ${response.status}: ${response.statusText} - ${errorText.slice(0, 200)}`);
         // Throw error with status code so rate limit handler can detect 429
         throw new Error(`${response.status}: ${response.statusText}`);
     }
 
     const data = await response.json() as T;
-    console.log(`[Granola] API success: ${endpoint}`);
+    log.debug(`API success: ${endpoint}`);
     return data;
 }
 
@@ -186,11 +189,11 @@ async function getDocuments(accessToken: string, limit: number, offset: number) 
 
     try {
         const parsed = GetDocumentsResponse.parse(response);
-        console.log(`[Granola] Fetched ${parsed.docs.length} documents (offset: ${offset})`);
+        log.debug(`Fetched ${parsed.docs.length} documents (offset: ${offset})`);
         return parsed;
     } catch (error) {
-        console.error('[Granola] Failed to parse documents response:', error);
-        console.error('[Granola] Raw response:', JSON.stringify(response, null, 2).slice(0, 1000));
+        log.error('Failed to parse documents response:', error);
+        log.error('Raw response:', JSON.stringify(response, null, 2).slice(0, 1000));
         return null;
     }
 }
@@ -327,7 +330,7 @@ function documentToMarkdown(doc: Document): string {
 // --- Sync Logic ---
 
 async function syncNotes(): Promise<void> {
-    console.log('[Granola] Starting sync...');
+    log.debug('Starting sync...');
 
     let runId: string | null = null;
     let runStartedAt = 0;
@@ -348,14 +351,14 @@ async function syncNotes(): Promise<void> {
         const granolaRepo = container.resolve<IGranolaConfigRepo>('granolaConfigRepo');
         const config = await granolaRepo.getConfig();
         if (!config.enabled) {
-            console.log('[Granola] Sync disabled in config');
+            log.debug('Sync disabled in config');
             return;
         }
 
         // Extract access token
         const accessToken = extractAccessToken();
         if (!accessToken) {
-            console.log('[Granola] No access token available');
+            log.debug('No access token available');
             return;
         }
 
@@ -384,12 +387,12 @@ async function syncNotes(): Promise<void> {
 
             const docsResponse = await getDocuments(accessToken, MAX_BATCH_SIZE, offset);
             if (!docsResponse) {
-                console.log('[Granola] Failed to fetch documents');
+                log.debug('Failed to fetch documents');
                 break;
             }
 
             if (docsResponse.docs.length === 0) {
-                console.log('[Granola] No more documents to fetch');
+                log.debug('No more documents to fetch');
                 hasMore = false;
                 break;
             }
@@ -400,7 +403,7 @@ async function syncNotes(): Promise<void> {
                 // Skip documents outside the lookback period
                 const docDate = new Date(doc.created_at);
                 if (docDate < lookbackCutoff) {
-                    console.log(`[Granola] Document "${doc.title}" is older than ${LOOKBACK_DAYS} days, stopping pagination`);
+                    log.debug(`Document "${doc.title}" is older than ${LOOKBACK_DAYS} days, stopping pagination`);
                     foundOldDoc = true;
                     break;
                 }
@@ -434,10 +437,10 @@ async function syncNotes(): Promise<void> {
                 fs.writeFileSync(filePath, markdown);
 
                 if (lastSyncedAt) {
-                    console.log(`[Granola] Updated: ${filename}`);
+                    log.debug(`Updated: ${filename}`);
                     updatedCount++;
                 } else {
-                    console.log(`[Granola] Saved: ${filename}`);
+                    log.debug(`Saved: ${filename}`);
                     newCount++;
                 }
 
@@ -464,7 +467,7 @@ async function syncNotes(): Promise<void> {
         state.lastSyncDate = new Date().toISOString();
         saveState(state);
 
-        console.log(`[Granola] Sync complete: ${newCount} new, ${updatedCount} updated`);
+        log.debug(`Sync complete: ${newCount} new, ${updatedCount} updated`);
 
         if (runId) {
             const totalChanges = newCount + updatedCount;
@@ -496,7 +499,7 @@ async function syncNotes(): Promise<void> {
             // Graph building is now handled by the independent graph builder service
         }
     } catch (error) {
-        console.error('[Granola] Error in sync:', error);
+        log.error('Error in sync:', error);
         if (runId) {
             await serviceLogger.log({
                 type: 'error',
@@ -523,19 +526,19 @@ async function syncNotes(): Promise<void> {
 // --- Main Loop ---
 
 export async function init(): Promise<void> {
-    console.log('[Granola] Starting Granola Sync...');
-    console.log(`[Granola] Will sync every ${SYNC_INTERVAL_MS / 60000} minutes.`);
-    console.log(`[Granola] Notes will be saved to: ${SYNC_DIR}`);
+    log.debug('Starting Granola Sync...');
+    log.debug(`Will sync every ${SYNC_INTERVAL_MS / 60000} minutes.`);
+    log.debug(`Notes will be saved to: ${SYNC_DIR}`);
 
     while (true) {
         try {
             await syncNotes();
         } catch (error) {
-            console.error('[Granola] Error in sync loop:', error);
+            log.error('Error in sync loop:', error);
         }
 
         // Sleep before next check (can be interrupted by triggerSync)
-        console.log(`[Granola] Sleeping for ${SYNC_INTERVAL_MS / 60000} minutes...`);
+        log.debug(`Sleeping for ${SYNC_INTERVAL_MS / 60000} minutes...`);
         await interruptibleSleep(SYNC_INTERVAL_MS);
     }
 }

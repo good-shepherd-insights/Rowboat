@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('AgentNotes');
+
 
 const STATE_FILE = path.join(WorkDir, 'agent_notes_state.json');
 
@@ -20,7 +24,7 @@ export function loadAgentNotesState(): AgentNotesState {
             }
             return parsed;
         } catch (error) {
-            console.error('Error loading agent notes state:', error);
+            log.error('Error loading agent notes state:', error);
         }
     }
 
@@ -35,7 +39,7 @@ export function saveAgentNotesState(state: AgentNotesState): void {
     try {
         fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
     } catch (error) {
-        console.error('Error saving agent notes state:', error);
+        log.error('Error saving agent notes state:', error);
         throw error;
     }
 }

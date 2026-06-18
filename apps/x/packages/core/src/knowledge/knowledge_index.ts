@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { WorkDir } from '../config/config.js';
+import { rootLogger } from '@x/shared';
+
+const log = rootLogger.child('KnowledgeIndex');
+
 
 const KNOWLEDGE_DIR = path.join(WorkDir, 'knowledge');
 
@@ -268,7 +272,7 @@ export function buildKnowledgeIndex(): KnowledgeIndex {
                     break;
             }
         } catch (error) {
-            console.error(`Error parsing note ${filePath}:`, error);
+            log.error(`Error parsing note ${filePath}:`, error);
         }
     }
 
