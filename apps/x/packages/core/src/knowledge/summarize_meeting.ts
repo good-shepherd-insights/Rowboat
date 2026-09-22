@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { generateText } from 'ai';
-import { createProvider } from '../models/models.js';
-import { getDefaultModelAndProvider, getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
+import { createLanguageModel } from '../models/models.js';
+import { getMeetingNotesModel, resolveProviderConfig } from '../models/defaults.js';
+import { directCallReasoningOptions } from '../models/reasoning.js';
 import { WorkDir } from '../config/config.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
@@ -137,10 +138,10 @@ function loadCalendarEventContext(calendarEventJson: string): string {
 }
 
 export async function summarizeMeeting(transcript: string, meetingStartTime?: string, calendarEventJson?: string): Promise<string> {
-    const modelId = await getMeetingNotesModel();
-    const { provider: providerName } = await getDefaultModelAndProvider();
+    const { model: modelId, provider: providerName, effort } = await getMeetingNotesModel();
     const providerConfig = await resolveProviderConfig(providerName);
-    const model = createProvider(providerConfig).languageModel(modelId);
+    const model = createLanguageModel(providerConfig, modelId);
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, modelId, effort);
 
     // If a specific calendar event was linked, use it directly.
     // Otherwise fall back to scanning events within ±3 hours.
@@ -155,8 +156,9 @@ export async function summarizeMeeting(transcript: string, meetingStartTime?: st
 
     const result = await withUseCase({ useCase: 'meeting_note' }, () => generateText({
         model,
-        system: SYSTEM_PROMPT,
+        instructions: SYSTEM_PROMPT,
         prompt,
+        ...reasoning,
     }));
 
     captureLlmUsage({

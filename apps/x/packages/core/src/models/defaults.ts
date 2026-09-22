@@ -1,110 +1,153 @@
 import z from "zod";
-import { LlmProvider } from "@x/shared/dist/models.js";
+import { LlmModelConfig, LlmProvider, ModelSelection as ModelSelectionSchema, type TaskModelKey } from "@x/shared/dist/models.js";
 import { IModelConfigRepo } from "./repo.js";
-import { isSignedIn } from "../account/account.js";
 import container from "../di/container.js";
 
-const SIGNED_IN_DEFAULT_MODEL = "gpt-5.4";
-const SIGNED_IN_DEFAULT_PROVIDER = "rowboat";
-const SIGNED_IN_KG_MODEL = "google/gemini-3.1-flash-lite";
-const SIGNED_IN_LIVE_NOTE_AGENT_MODEL = "google/gemini-3.1-flash-lite";
-const SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL = "google/gemini-3.1-flash-lite";
+// THE canonical selection: provider + model + the effort picked with them,
+// one value threaded from UI through IPC to run creation. Callers forward
+// `effort` verbatim into run options; absent = Auto (send nothing).
+export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
 
-/**
- * The single source of truth for "what model+provider should we use when
- * the caller didn't specify and the agent didn't declare". Returns names only.
- * This is the only place that branches on signed-in state.
- */
-export async function getDefaultModelAndProvider(): Promise<{ model: string; provider: string }> {
-    if (await isSignedIn()) {
-        return { model: SIGNED_IN_DEFAULT_MODEL, provider: SIGNED_IN_DEFAULT_PROVIDER };
+async function readConfig(): Promise<z.infer<typeof LlmModelConfig> | null> {
+    try {
+        const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
+        return await repo.getConfig();
+    } catch {
+        // Fresh install before ensureConfig ran, or an unreadable file.
+        return null;
     }
-    const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
-    const cfg = await repo.getConfig();
-    return { model: cfg.model, provider: cfg.provider.flavor };
 }
 
 /**
- * Resolve a provider name (as stored on a run, an agent, or returned by
- * getDefaultModelAndProvider) into the full LlmProvider config that
- * createProvider expects (apiKey/baseURL/headers).
+ * The single source of truth for "what model+provider should we use when
+ * the caller didn't specify and the agent didn't declare": the config's
+ * assistantModel, period. It is written by onboarding / provider connect
+ * (via initial selection) and by every model pick in the UI; hidden
+ * fallback defaults were removed with the v2 config migration.
+ */
+export async function getDefaultModelAndProvider(): Promise<ModelSelection> {
+    const cfg = await readConfig();
+    const assistant = cfg?.assistantModel;
+    if (!assistant) {
+        throw new Error("No assistant model configured (connect a provider or sign in)");
+    }
+    return {
+        model: assistant.model,
+        provider: assistant.provider,
+        ...(assistant.effort ? { effort: assistant.effort } : {}),
+    };
+}
+
+/**
+ * A resolved selection as headless-run options: the `effort` stored on the
+ * selection travels as the run option `reasoningEffort`. Spread this instead
+ * of the raw selection (whose `effort` key run options don't know).
+ */
+export function asRunModelOptions(selection: ModelSelection): {
+    model: string;
+    provider: string;
+    reasoningEffort?: "low" | "medium" | "high";
+} {
+    return {
+        model: selection.model,
+        provider: selection.provider,
+        ...(selection.effort ? { reasoningEffort: selection.effort } : {}),
+    };
+}
+
+/**
+ * "Defer background tasks while a chat is running" (settings checkbox,
+ * models.json `deferBackgroundTasks`). Read at each background invocation so
+ * toggling takes effect immediately.
+ */
+export async function shouldDeferBackgroundTasks(): Promise<boolean> {
+    const cfg = await readConfig();
+    return cfg?.deferBackgroundTasks === true;
+}
+
+/**
+ * Resolve a provider instance id (as stored on a run, an agent, or returned
+ * by getDefaultModelAndProvider) into the LlmProvider entry that
+ * createProvider expects.
  *
  * - "rowboat" → gateway provider (auth via OAuth bearer; no creds field).
- * - other names → look up models.json's `providers[name]` map.
- * - fallback: if the name matches the active default's flavor (legacy
- *   single-provider configs that didn't write to the providers map yet).
+ * - "codex" → ChatGPT subscription (auth in chatgpt-auth.json).
+ * - other ids → the models.json providers map.
  */
 export async function resolveProviderConfig(name: string): Promise<z.infer<typeof LlmProvider>> {
     if (name === "rowboat") {
         return { flavor: "rowboat" };
     }
-    const repo = container.resolve<IModelConfigRepo>("modelConfigRepo");
-    const cfg = await repo.getConfig();
-    const entry = cfg.providers?.[name];
-    if (entry) {
-        return LlmProvider.parse({
-            flavor: name,
-            apiKey: entry.apiKey,
-            baseURL: entry.baseURL,
-            headers: entry.headers,
-        });
+    if (name === "codex") {
+        return { flavor: "codex" };
     }
-    if (cfg.provider.flavor === name) {
-        return cfg.provider;
+    const cfg = await readConfig();
+    const entry = cfg?.providers[name];
+    if (!entry) {
+        throw new Error(`Provider '${name}' is referenced but not configured`);
     }
-    throw new Error(`Provider '${name}' is referenced but not configured`);
+    return entry;
 }
 
 /**
- * Model used by knowledge-graph agents (note_creation, labeling_agent, etc.)
- * when they're the top-level of a run. Signed-in: curated default.
- * BYOK: user override (`knowledgeGraphModel`) or assistant model.
+ * Per-task model resolution: the explicit taskModels override wins (with the
+ * effort stored on it), else the assistant model+effort pair. No hidden
+ * per-task defaults — the v2 migration materialized the historical curated
+ * models as visible overrides.
  */
-export async function getKgModel(): Promise<string> {
-    if (await isSignedIn()) return SIGNED_IN_KG_MODEL;
-    const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
-    return cfg.knowledgeGraphModel ?? cfg.model;
+async function getCategoryModel(category: TaskModelKey): Promise<ModelSelection> {
+    const cfg = await readConfig();
+    const override = cfg?.taskModels?.[category];
+    if (override) {
+        return {
+            model: override.model,
+            provider: override.provider,
+            ...(override.effort ? { effort: override.effort } : {}),
+        };
+    }
+    return getDefaultModelAndProvider();
 }
 
 /**
- * Model used by the live-note agent + routing classifier.
- * Signed-in: curated default. BYOK: user override (`liveNoteAgentModel`) or
- * assistant model.
+ * Model used by knowledge-graph agents (note_creation, the email classifier,
+ * etc.) when they're the top-level of a run.
  */
-export async function getLiveNoteAgentModel(): Promise<string> {
-    if (await isSignedIn()) return SIGNED_IN_LIVE_NOTE_AGENT_MODEL;
-    const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
-    return cfg.liveNoteAgentModel ?? cfg.model;
+export async function getKgModel(): Promise<ModelSelection> {
+    return getCategoryModel("knowledgeGraph");
+}
+
+/** Model used by the live-note agent + routing classifier. */
+export async function getLiveNoteAgentModel(): Promise<ModelSelection> {
+    return getCategoryModel("liveNoteAgent");
+}
+
+/** Model used by the auto-permission classifier. */
+export async function getAutoPermissionDecisionModel(): Promise<ModelSelection> {
+    return getCategoryModel("autoPermissionDecision");
+}
+
+/** Model used by the meeting-notes summarizer. */
+export async function getMeetingNotesModel(): Promise<ModelSelection> {
+    return getCategoryModel("meetingNotes");
+}
+
+/** Model used to auto-name chat sessions from the first user message. */
+export async function getChatTitleModel(): Promise<ModelSelection> {
+    return getCategoryModel("chatTitle");
+}
+
+/** Model used by the background-task agent + routing classifier. */
+export async function getBackgroundTaskAgentModel(): Promise<ModelSelection> {
+    return getCategoryModel("backgroundTask");
 }
 
 /**
- * Model used by the auto-permission classifier.
- * Signed-in: curated default. BYOK: user override
- * (`autoPermissionDecisionModel`) or assistant model.
+ * Explicit subagent model override, or null to inherit the PARENT turn's
+ * model (spawn-agent's default — which is the assistant for a top-level
+ * chat). Not getCategoryModel: the no-override fallback is the parent, not
+ * the assistant, and the caller owns that resolution.
  */
-export async function getAutoPermissionDecisionModel(): Promise<string> {
-    if (await isSignedIn()) return SIGNED_IN_AUTO_PERMISSION_DECISION_MODEL;
-    const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
-    return cfg.autoPermissionDecisionModel ?? cfg.model;
-}
-
-/**
- * Model used by the meeting-notes summarizer. No special signed-in default —
- * historically meetings used the assistant model. BYOK: user override
- * (`meetingNotesModel`) or assistant model.
- */
-export async function getMeetingNotesModel(): Promise<string> {
-    if (await isSignedIn()) return SIGNED_IN_DEFAULT_MODEL;
-    const cfg = await container.resolve<IModelConfigRepo>("modelConfigRepo").getConfig();
-    return cfg.meetingNotesModel ?? cfg.model;
-}
-
-/**
- * Model used by the background-task agent + routing classifier. Currently
- * mirrors `getLiveNoteAgentModel()` — both surfaces want a fast, reliable
- * agent model. Split into its own getter so a future per-feature override
- * doesn't require touching all call sites.
- */
-export async function getBackgroundTaskAgentModel(): Promise<string> {
-    return getLiveNoteAgentModel();
+export async function getSubagentModelOverride(): Promise<ModelSelection | null> {
+    const cfg = await readConfig();
+    return cfg?.taskModels?.subagent ?? null;
 }

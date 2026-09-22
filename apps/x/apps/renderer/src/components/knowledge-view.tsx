@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { FileListContextMenu } from '@/components/file-list-context-menu'
 import {
-  ArrowLeft,
   ChevronRight,
   Copy,
   ExternalLink,
@@ -23,7 +23,8 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { Input } from '@/components/ui/input'
-import { VoiceNoteButton } from '@/components/sidebar-content'
+import { VoiceNoteButton } from '@/components/voice-note-button'
+import { getViewerType } from '@/lib/file-types'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
@@ -38,6 +39,7 @@ interface TreeNode {
 
 export type KnowledgeViewActions = {
   createNote: (parentPath?: string) => void
+  addGoogleDoc: (parentPath?: string) => void
   createFolder: (parentPath?: string) => Promise<string>
   rename: (path: string, newName: string, isDir: boolean) => Promise<void>
   remove: (path: string) => Promise<void>
@@ -46,17 +48,21 @@ export type KnowledgeViewActions = {
   onOpenInNewTab?: (path: string) => void
 }
 
+export type KnowledgeViewMode = 'graph' | 'basis' | 'files'
+
 type KnowledgeViewProps = {
   tree: TreeNode[]
   actions: KnowledgeViewActions
+  mode: KnowledgeViewMode
+  onModeChange: (mode: KnowledgeViewMode) => void
+  graphContent: ReactNode
+  basisContent: ReactNode
   // Folder currently being browsed (null = root overview). Controlled by the
   // app so drill-down participates in the global back/forward history.
   folderPath: string | null
   onNavigateFolder: (path: string | null) => void
   onOpenNote: (path: string) => void
-  onOpenGraph: () => void
   onOpenSearch: () => void
-  onOpenBases: () => void
   onVoiceNoteCreated?: (path: string) => void
 }
 
@@ -65,20 +71,6 @@ const HIDDEN_PATHS = new Set(['knowledge/Meetings', 'knowledge/Workspace'])
 
 // Theme-aware accent palette for folder avatars — colored letter on a faint
 // tint of the same hue. Mirrors the design's six-colour rotation.
-const AVATAR_PALETTE = [
-  'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400',
-  'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-  'bg-rose-500/10 text-rose-600 dark:text-rose-400',
-  'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-  'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-] as const
-
-function avatarClass(name: string): string {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
-  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length]
-}
 
 function isMarkdown(node: TreeNode): boolean {
   return node.kind === 'file' && node.name.toLowerCase().endsWith('.md')
@@ -102,6 +94,21 @@ function latestMtime(node: TreeNode): number {
   let max = node.stat?.mtimeMs ?? 0
   for (const child of node.children ?? []) max = Math.max(max, latestMtime(child))
   return max
+}
+
+function GoogleDriveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path fill="#1FA463" d="M8.52 3.5h6.96l6.95 12.04h-6.96L8.52 3.5Z" />
+      <path fill="#FFD04B" d="M1.57 15.54 8.52 3.5l3.48 6.02-3.48 6.02H1.57Z" />
+      <path fill="#4688F1" d="M8.52 15.54h13.91L18.95 21H5.05l3.47-5.46Z" />
+    </svg>
+  )
 }
 
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
@@ -145,12 +152,14 @@ function displayName(node: TreeNode): string {
 export function KnowledgeView({
   tree,
   actions,
+  mode,
+  onModeChange,
+  graphContent,
+  basisContent,
   folderPath,
   onNavigateFolder,
   onOpenNote,
-  onOpenGraph,
   onOpenSearch,
-  onOpenBases,
   onVoiceNoteCreated,
 }: KnowledgeViewProps) {
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
@@ -181,32 +190,56 @@ export function KnowledgeView({
   const currentFolder = folderPath ? findNode(tree, folderPath) : null
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="shrink-0 flex items-start justify-between gap-4 border-b border-border px-8 py-6">
+    <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
+      <div className="mx-auto w-full max-w-[1120px] shrink-0 flex items-start justify-between gap-4 px-[30px] pt-[34px] pb-5">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">Notes</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Brain</h1>
+          <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">
             {totalNotes} {totalNotes === 1 ? 'note' : 'notes'} across {folders.length}{' '}
             {folders.length === 1 ? 'folder' : 'folders'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-lg border border-border bg-background">
+            <ViewModeButton
+              icon={Network}
+              label="Graph"
+              active={mode === 'graph'}
+              onClick={() => onModeChange('graph')}
+            />
+            <ViewModeButton
+              icon={Table2}
+              label="Base"
+              active={mode === 'basis'}
+              onClick={() => onModeChange('basis')}
+            />
+            <ViewModeButton
+              icon={FileText}
+              label="Files"
+              active={mode === 'files'}
+              onClick={() => onModeChange('files')}
+            />
+          </div>
           <VoiceNoteButton onNoteCreated={onVoiceNoteCreated} />
-          <SecondaryButton icon={SearchIcon} label="Search" onClick={onOpenSearch} />
-          <SecondaryButton icon={Network} label="Graph" onClick={onOpenGraph} />
-          <button
-            type="button"
-            onClick={() => actions.createNote(currentFolder?.path)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            <FilePlus className="size-4" />
-            <span>New note</span>
-          </button>
         </div>
       </div>
 
+      {mode === 'graph' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {graphContent}
+        </div>
+      ) : mode === 'basis' ? (
+        <div className="mx-auto flex w-full max-w-[1120px] flex-1 min-h-0 flex-col overflow-hidden px-[30px] pb-6">
+          {basisContent}
+        </div>
+      ) : (
+      <FileListContextMenu actions={[
+        { label: 'New note', onSelect: () => actions.createNote(currentFolder?.path) },
+        { label: 'New folder', onSelect: () => { void actions.createFolder(currentFolder?.path).then(setRenameTarget).catch(() => {}) } },
+        { label: 'Add Google Doc', onSelect: () => actions.addGoogleDoc(currentFolder?.path) },
+      ]}>
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-8 py-6">
+        <div className="mx-auto w-full max-w-[1120px] px-[30px] py-6">
           {currentFolder ? (
             <FolderDetail
               folder={currentFolder}
@@ -220,11 +253,11 @@ export function KnowledgeView({
             />
           ) : (
             <>
-              <SectionHeader label={`Folders · ${folders.length}`} aside="Sorted by name" />
+              <SectionHeader label={`Folders · ${folders.length}`} />
               {folders.length === 0 ? (
                 <EmptyState text="No folders yet." />
               ) : (
-                <div className="overflow-hidden rounded-xl border border-border">
+                <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
                   {folders.map((node, i) => (
                     <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
                       <FolderCard
@@ -244,7 +277,7 @@ export function KnowledgeView({
               {looseNotes.length > 0 && (
                 <div className="mt-8">
                   <SectionHeader label={`Loose notes · ${looseNotes.length}`} />
-                  <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
                     {looseNotes.map((node, i) => (
                       <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
                         <ItemRow
@@ -267,11 +300,13 @@ export function KnowledgeView({
           <QuickActions
             actions={actions}
             currentFolder={currentFolder}
-            onOpenBases={onOpenBases}
+            onOpenSearch={onOpenSearch}
             onFolderCreated={setRenameTarget}
           />
         </div>
       </div>
+      </FileListContextMenu>
+      )}
     </div>
   )
 }
@@ -279,12 +314,12 @@ export function KnowledgeView({
 function QuickActions({
   actions,
   currentFolder,
-  onOpenBases,
+  onOpenSearch,
   onFolderCreated,
 }: {
   actions: KnowledgeViewActions
   currentFolder: TreeNode | null
-  onOpenBases: () => void
+  onOpenSearch: () => void
   onFolderCreated: (path: string) => void
 }) {
   // Inside a folder these target that folder; at the root they target knowledge/.
@@ -294,6 +329,8 @@ function QuickActions({
       <SectionHeader label="Quick actions" />
       <div className="flex flex-wrap gap-2">
         <QuickAction icon={FilePlus} label="New note" onClick={() => actions.createNote(parent)} />
+        <QuickAction icon={GoogleDriveIcon} label="Add Google Doc" onClick={() => actions.addGoogleDoc(parent)} />
+        <QuickAction icon={SearchIcon} label="Search" onClick={onOpenSearch} />
         <QuickAction
           icon={FolderPlus}
           label="New folder"
@@ -304,7 +341,6 @@ function QuickActions({
             } catch { /* ignore */ }
           }}
         />
-        <QuickAction icon={Table2} label="Open as base" onClick={onOpenBases} />
         <QuickAction
           icon={FolderOpen}
           label={`Reveal in ${getFileManagerName()}`}
@@ -315,20 +351,26 @@ function QuickActions({
   )
 }
 
-function SecondaryButton({
+function ViewModeButton({
   icon: Icon,
   label,
+  active,
   onClick,
 }: {
   icon: typeof SearchIcon
   label: string
+  active: boolean
   onClick: () => void
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+      aria-pressed={active}
+      className={cn(
+        'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors',
+        active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+      )}
     >
       <Icon className="size-4" />
       <span>{label}</span>
@@ -341,7 +383,7 @@ function QuickAction({
   label,
   onClick,
 }: {
-  icon: typeof FilePlus
+  icon: typeof FilePlus | typeof GoogleDriveIcon
   label: string
   onClick: () => void
 }) {
@@ -349,9 +391,9 @@ function QuickAction({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+      className="inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
-      <Icon className="size-4 text-muted-foreground" />
+      <Icon className="size-4" />
       <span>{label}</span>
     </button>
   )
@@ -360,7 +402,7 @@ function QuickAction({
 function SectionHeader({ label, aside }: { label: string; aside?: string }) {
   return (
     <div className="mb-2.5 flex items-center justify-between">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <span className="text-[13px] text-muted-foreground">
         {label}
       </span>
       {aside && <span className="text-xs text-muted-foreground">{aside}</span>}
@@ -372,20 +414,6 @@ function EmptyState({ text }: { text: string }) {
   return (
     <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
       {text}
-    </div>
-  )
-}
-
-function FolderAvatar({ name, className }: { name: string; className?: string }) {
-  return (
-    <div
-      className={cn(
-        'flex size-8 shrink-0 items-center justify-center rounded-md text-[13px] font-bold',
-        avatarClass(name),
-        className,
-      )}
-    >
-      {name.charAt(0).toUpperCase() || '?'}
     </div>
   )
 }
@@ -423,9 +451,8 @@ function FolderCard({
           onOpenFolder(node.path)
         }
       }}
-      className="group flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
+      className="group flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50"
     >
-      <FolderAvatar name={node.name} className="mt-0.5" />
       <div className="min-w-0 flex-1">
         {renameActive ? (
           <RenameField
@@ -440,28 +467,32 @@ function FolderCard({
             {node.name}
           </span>
         )}
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          {count} {count === 1 ? 'note' : 'notes'}
+        <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">
+          <span className="shrink-0">
+            {count} {count === 1 ? 'note' : 'notes'}
+          </span>
+          {peek.length > 0 && (
+            <span className="truncate text-muted-foreground/70">
+              {peek.map((n) => (
+                <span key={n.path}>
+                  <span className="text-muted-foreground/40">{' · '}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onOpenNote(n.path)
+                    }}
+                    className="transition-colors hover:text-foreground hover:underline"
+                  >
+                    {displayName(n)}
+                  </button>
+                </span>
+              ))}
+            </span>
+          )}
         </div>
-        {peek.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {peek.map((n) => (
-              <button
-                key={n.path}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onOpenNote(n.path)
-                }}
-                className="max-w-[200px] truncate rounded-full border border-border/60 bg-muted px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {displayName(n)}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
-      <div className="flex shrink-0 items-center gap-2 pt-1">
+      <div className="flex shrink-0 items-center gap-2">
         <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
           {modified}
         </span>
@@ -518,21 +549,10 @@ function FolderDetail({
       <div className="mb-4 flex min-w-0 items-center gap-1.5 text-sm">
         <button
           type="button"
-          onClick={() => {
-            const parent = crumbs.length >= 2 ? crumbs[crumbs.length - 2].path : null
-            onNavigate(parent)
-          }}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="Back"
-        >
-          <ArrowLeft className="size-4" />
-        </button>
-        <button
-          type="button"
           onClick={() => onNavigate(null)}
           className="rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          Notes
+          Brain
         </button>
         {crumbs.map((c, i) => (
           <span key={c.path} className="flex min-w-0 items-center gap-1.5">
@@ -556,7 +576,7 @@ function FolderDetail({
       {items.length === 0 ? (
         <EmptyState text="This folder is empty." />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border">
+        <div className="overflow-hidden rounded-xl border border-black/15 dark:border-border">
           {items.map((node, i) => (
             <div key={node.path} className={cn(i > 0 && 'border-t border-border/60')}>
               <ItemRow
@@ -616,13 +636,6 @@ function ItemRow({
       }}
       className="group flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50"
     >
-      {isDir ? (
-        <FolderAvatar name={node.name} />
-      ) : (
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <FileText className="size-4" />
-        </div>
-      )}
       <div className="min-w-0 flex-1">
         {renameActive ? (
           <RenameField
@@ -633,16 +646,21 @@ function ItemRow({
             onDone={onClearRename}
           />
         ) : (
-          <span className="block truncate text-sm text-foreground">{displayName(node)}</span>
-        )}
-        {isDir && (
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {count} {count === 1 ? 'note' : 'notes'}
-          </div>
+          <span className="block truncate text-sm font-semibold text-foreground">
+            {displayName(node)}
+          </span>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+      <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+        {isDir && (
+          <>
+            <span className="whitespace-nowrap">
+              {count} {count === 1 ? 'note' : 'notes'}
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+          </>
+        )}
+        <span className="tabular-nums whitespace-nowrap">
           {modified}
         </span>
         {isDir && (
@@ -764,6 +782,10 @@ function RowContextMenu({
               <FilePlus className="mr-2 size-4" />
               New Note
             </ContextMenuItem>
+            <ContextMenuItem onClick={() => actions.addGoogleDoc(node.path)}>
+              <GoogleDriveIcon className="mr-2 size-4" />
+              Add Google Doc
+            </ContextMenuItem>
             <ContextMenuItem onClick={() => void actions.createFolder(node.path)}>
               <FolderPlus className="mr-2 size-4" />
               New Folder
@@ -771,12 +793,20 @@ function RowContextMenu({
             <ContextMenuSeparator />
           </>
         )}
-        {!isDir && actions.onOpenInNewTab && (
+        {!isDir && (actions.onOpenInNewTab || getViewerType(node.path) === 'spreadsheet') && (
           <>
-            <ContextMenuItem onClick={() => actions.onOpenInNewTab!(node.path)}>
-              <ExternalLink className="mr-2 size-4" />
-              Open in new tab
-            </ContextMenuItem>
+            {actions.onOpenInNewTab && (
+              <ContextMenuItem onClick={() => actions.onOpenInNewTab!(node.path)}>
+                <ExternalLink className="mr-2 size-4" />
+                Open in new tab
+              </ContextMenuItem>
+            )}
+            {getViewerType(node.path) === 'spreadsheet' && (
+              <ContextMenuItem onClick={() => { void window.ipc.invoke('shell:openPath', { path: node.path }) }}>
+                <Table2 className="mr-2 size-4" />
+                Open in System App
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
           </>
         )}

@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron';
 import { ipc } from '@x/shared';
-import { browserViewManager, type BrowserState } from './view.js';
+import { browserViewManager, type BrowserState, type DisplayMediaRequest, type HttpAuthRequest } from './view.js';
 
 type IPCChannels = ipc.IPCChannels;
 
@@ -20,6 +20,8 @@ type BrowserHandlers = {
   'browser:forward': InvokeHandler<'browser:forward'>;
   'browser:reload': InvokeHandler<'browser:reload'>;
   'browser:getState': InvokeHandler<'browser:getState'>;
+  'browser:httpAuthResponse': InvokeHandler<'browser:httpAuthResponse'>;
+  'browser:displayMediaResponse': InvokeHandler<'browser:displayMediaResponse'>;
 };
 
 /**
@@ -33,6 +35,9 @@ export const browserIpcHandlers: BrowserHandlers = {
     browserViewManager.setBounds(args);
     return { ok: true };
   },
+  // Deliberately synchronous: any async work (e.g. a frame capture) before
+  // the hide lets a show/hide pair race and strand the native view on top of
+  // the app. A blank viewport under overlays is the accepted trade-off.
   'browser:setVisible': async (_event, args) => {
     browserViewManager.setVisible(args.visible);
     return { ok: true };
@@ -55,12 +60,18 @@ export const browserIpcHandlers: BrowserHandlers = {
   'browser:forward': async () => {
     return browserViewManager.forward();
   },
-  'browser:reload': async () => {
-    browserViewManager.reload();
+  'browser:reload': async (_event, args) => {
+    browserViewManager.reload(args?.tabId);
     return { ok: true };
   },
   'browser:getState': async () => {
     return browserViewManager.getState();
+  },
+  'browser:httpAuthResponse': async (_event, args) => {
+    return browserViewManager.respondToHttpAuth(args);
+  },
+  'browser:displayMediaResponse': async (_event, args) => {
+    return browserViewManager.respondToDisplayMedia(args);
   },
 };
 
@@ -70,12 +81,34 @@ export const browserIpcHandlers: BrowserHandlers = {
  * window is created so the manager has a window to attach to.
  */
 export function setupBrowserEventForwarding(): void {
-  browserViewManager.on('state-updated', (state: BrowserState) => {
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      if (!win.isDestroyed() && win.webContents) {
-        win.webContents.send('browser:didUpdateState', state);
-      }
+  // Only send to app windows, never to OAuth/SSO popup windows created by
+  // page window.open() — those render untrusted web content, and browsing
+  // state / auth-challenge metadata must not cross into them.
+  const broadcast = (channel: string, payload: unknown) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || !win.webContents) continue;
+      if (browserViewManager.isPopupWindow(win)) continue;
+      win.webContents.send(channel, payload);
     }
+  };
+
+  browserViewManager.on('state-updated', (state: BrowserState) => {
+    broadcast('browser:didUpdateState', state);
+  });
+
+  browserViewManager.on('http-auth-request', (request: HttpAuthRequest) => {
+    broadcast('browser:httpAuthRequest', request);
+  });
+
+  browserViewManager.on('http-auth-resolved', (requestId: string) => {
+    broadcast('browser:httpAuthResolved', { requestId });
+  });
+
+  browserViewManager.on('display-media-request', (request: DisplayMediaRequest) => {
+    broadcast('browser:displayMediaRequest', request);
+  });
+
+  browserViewManager.on('display-media-resolved', (requestId: string) => {
+    broadcast('browser:displayMediaResolved', { requestId });
   });
 }

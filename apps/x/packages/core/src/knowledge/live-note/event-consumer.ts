@@ -3,15 +3,16 @@ import { fetchLiveNote } from './fileops.js';
 import { runLiveNoteAgent } from './runner.js';
 import type { EventConsumer, EventConsumerTarget } from '../../events/consumer.js';
 import { routeBatch } from '../../events/routing.js';
-import { createProvider } from '../../models/models.js';
-import { getDefaultModelAndProvider, getLiveNoteAgentModel, resolveProviderConfig } from '../../models/defaults.js';
+import { createLanguageModel } from '../../models/models.js';
+import { getLiveNoteAgentModel, resolveProviderConfig } from '../../models/defaults.js';
 
 async function resolveRoutingModel() {
-    const modelId = await getLiveNoteAgentModel();
-    const { provider } = await getDefaultModelAndProvider();
+    // Deliberately effort-free: the routing pass is a cheap yes/no
+    // classifier; the liveNoteAgent effort applies to the agent RUNS it triggers.
+    const { model: modelId, provider } = await getLiveNoteAgentModel();
     const config = await resolveProviderConfig(provider);
     return {
-        model: createProvider(config).languageModel(modelId),
+        model: createLanguageModel(config, modelId),
         modelId,
         providerName: provider,
     };

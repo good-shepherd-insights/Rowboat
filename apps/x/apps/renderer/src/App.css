@@ -82,64 +82,40 @@
   background-image: radial-gradient(circle, oklch(0.7 0 0 / 0.06) 1px, transparent 1px);
 }
 
+/* Inbox surface — mapped onto the app's design tokens so it follows the same
+   palette, accent, and theme switching as the rest of Rowboat. Light/dark is
+   handled by the app tokens (:root / .dark), so no separate .light override. */
 .gmail-shell {
-  --gm-bg: #0f0f12;
-  --gm-bg-card: #131317;
-  --gm-bg-input: #1c1c20;
-  --gm-bg-row-hover: #16161a;
-  --gm-bg-row-selected: #1a1620;
-  --gm-bg-row-selected-hover: #1d1825;
-  --gm-bg-iframe: #fafafa;
-  --gm-bg-pill: #1c1c20;
-  --gm-bg-pill-hover: #232328;
-  --gm-text: #e4e4e7;
-  --gm-text-strong: #fafafa;
-  --gm-text-muted: #71717a;
-  --gm-text-faint: #52525b;
-  --gm-text-body: #d4d4d8;
-  --gm-border: #1f1f24;
-  --gm-border-strong: #2e2e35;
-  --gm-accent: #a78bfa;
-  --gm-accent-hover: #b9a6ff;
-  --gm-accent-glow: rgba(167, 139, 250, 0.45);
-  --gm-accent-fg: #18181b;
-  --gm-icon-hover-bg: #1f1f24;
-  --gm-placeholder: #52525b;
+  --gm-bg: var(--background);
+  --gm-bg-card: var(--card-surface);
+  --gm-bg-input: var(--muted);
+  --gm-bg-row-hover: var(--accent);
+  --gm-bg-row-selected: var(--rowboat-wash);
+  --gm-bg-row-selected-hover: color-mix(in oklab, var(--primary) 18%, var(--background));
+  --gm-bg-iframe: #ffffff;
+  --gm-bg-pill: var(--background);
+  --gm-bg-pill-hover: var(--accent);
+  --gm-text: var(--foreground);
+  --gm-text-strong: var(--foreground);
+  --gm-text-muted: var(--muted-foreground);
+  --gm-text-faint: color-mix(in oklab, var(--muted-foreground) 70%, var(--background));
+  --gm-text-body: color-mix(in oklab, var(--foreground) 88%, var(--background));
+  --gm-border: var(--border);
+  --gm-border-strong: var(--rowboat-hairline);
+  --gm-accent: var(--primary);
+  --gm-accent-hover: color-mix(in oklab, var(--primary) 90%, transparent);
+  --gm-accent-glow: color-mix(in oklab, var(--primary) 40%, transparent);
+  --gm-accent-fg: var(--primary-foreground);
+  --gm-icon-hover-bg: var(--accent);
+  --gm-placeholder: var(--muted-foreground);
 
   display: flex;
   height: 100%;
   min-height: 0;
   width: 100%;
   overflow: hidden;
-  background: var(--gm-bg);
-  color: var(--gm-text);
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-feature-settings: "ss01", "cv11";
-}
-
-.light .gmail-shell {
-  --gm-bg: #ffffff;
-  --gm-bg-card: #ffffff;
-  --gm-bg-input: #f4f4f7;
-  --gm-bg-row-hover: #f7f7f9;
-  --gm-bg-row-selected: #f5f0ff;
-  --gm-bg-row-selected-hover: #ece4ff;
-  --gm-bg-iframe: #ffffff;
-  --gm-bg-pill: #ffffff;
-  --gm-bg-pill-hover: #f4f4f7;
-  --gm-text: #27272a;
-  --gm-text-strong: #09090b;
-  --gm-text-muted: #71717a;
-  --gm-text-faint: #a1a1aa;
-  --gm-text-body: #3f3f46;
-  --gm-border: #e4e4e7;
-  --gm-border-strong: #d4d4d8;
-  --gm-accent: #7c3aed;
-  --gm-accent-hover: #6d28d9;
-  --gm-accent-glow: rgba(124, 58, 237, 0.3);
-  --gm-accent-fg: #ffffff;
-  --gm-icon-hover-bg: #f4f4f7;
-  --gm-placeholder: #a1a1aa;
+  background: var(--background);
+  color: var(--foreground);
 }
 
 .gmail-main {
@@ -155,9 +131,16 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 52px;
+  min-height: var(--rowboat-header);
   padding: 0 20px;
   border-bottom: 1px solid var(--gm-border);
+}
+
+.gmail-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .gmail-search {
@@ -184,6 +167,25 @@
 
 .gmail-search input::placeholder {
   color: var(--gm-placeholder);
+}
+
+.gmail-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--gm-text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.gmail-search-clear:hover {
+  background: var(--gm-icon-hover-bg);
+  color: var(--gm-text);
 }
 
 .gmail-icon-button {
@@ -222,6 +224,46 @@
   flex-direction: column;
 }
 
+/* Native list virtualization: offscreen rows skip layout and paint entirely.
+   Applied only to rows without a mounted ThreadDetail (those hold iframes and
+   composers, which must keep rendering while offscreen). */
+.gmail-row-group-cv {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
+}
+
+/* While the list is scrolling, rows ignore the pointer so hover restyles and
+   prefetch timers don't compete with frame rendering. */
+.gmail-shell[data-scrolling] .gmail-row-shell {
+  pointer-events: none;
+}
+
+/* Archived/trashed rows slide out and collapse before removal. Removing the
+   class (failed action) snaps the row back. */
+.gmail-row-group-leaving {
+  overflow: hidden;
+  pointer-events: none;
+  animation: gmail-row-leave 160ms ease-in forwards;
+}
+
+@keyframes gmail-row-leave {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+    max-height: 48px;
+  }
+  60% {
+    opacity: 0;
+    transform: translateX(32px);
+    max-height: 48px;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(32px);
+    max-height: 0;
+  }
+}
+
 .gmail-list-header {
   position: sticky;
   top: 0;
@@ -237,6 +279,31 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+/* Date dividers within a section (Today / Yesterday / This week / Earlier). */
+.gmail-date-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px 4px;
+  color: var(--gm-text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+
+.gmail-date-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--gm-border);
+}
+
+.gmail-list-header + .gmail-date-divider {
+  padding-top: 8px;
 }
 
 .gmail-section {
@@ -288,11 +355,29 @@
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
+  /* The overlay may extend over the subject text; a backdrop matching the
+     row's current background (see --gm-row-actions-bg below) plus a soft left
+     fade keeps it readable instead of colliding. */
+  padding-left: 18px;
+  background: linear-gradient(to right, transparent, var(--gm-row-actions-bg, var(--gm-bg-row-hover)) 18px);
 }
 
 .gmail-row-shell:hover .gmail-row-actions {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* Backdrop color tracks the row state underneath the overlay. */
+.gmail-row-shell:hover {
+  --gm-row-actions-bg: var(--gm-bg-row-hover);
+}
+
+.gmail-row-shell:hover:has(.gmail-row-selected) {
+  --gm-row-actions-bg: var(--gm-bg-row-selected-hover);
+}
+
+.gmail-row-shell:hover:has(.gmail-row-selected.gmail-row-focused) {
+  --gm-row-actions-bg: var(--gm-bg-row-selected);
 }
 
 .gmail-row-shell:hover .gmail-row-date {
@@ -319,10 +404,10 @@
 }
 
 .gmail-row-action-danger:hover {
-  color: #e8453c;
+  color: var(--destructive);
 }
 
-.gmail-row:hover {
+.gmail-row-shell:hover .gmail-row {
   background: var(--gm-bg-row-hover);
   box-shadow: none;
 }
@@ -332,8 +417,22 @@
   box-shadow: inset 2px 0 0 var(--gm-accent);
 }
 
-.gmail-row-selected:hover {
+.gmail-row-shell:hover .gmail-row-selected {
   background: var(--gm-bg-row-selected-hover);
+}
+
+/* The j/k keyboard cursor. Declared after the hover rules (same specificity)
+   so the focus ring survives hovering the focused row. */
+.gmail-row-focused,
+.gmail-row-shell:hover .gmail-row-focused {
+  background: var(--gm-bg-row-hover);
+  box-shadow: inset 0 0 0 1px var(--gm-accent);
+}
+
+.gmail-row-selected.gmail-row-focused,
+.gmail-row-shell:hover .gmail-row-selected.gmail-row-focused {
+  background: var(--gm-bg-row-selected);
+  box-shadow: inset 2px 0 0 var(--gm-accent), inset 0 0 0 1px var(--gm-accent);
 }
 
 .gmail-row-unread {
@@ -386,10 +485,22 @@
   font-size: 13px;
 }
 
+/* The bold lead (summary or subject) may shrink — with ellipsis — but only
+   after the snippet span (huge shrink factor below) has fully collapsed.
+   Without this, a long summary plus the never-shrinking category chip
+   overflows the clipped row and the chip is what gets cut off. */
 .gmail-row-content strong {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: inherit;
   font-weight: 400;
+}
+
+/* Snippet gives way first (chips carry .gmail-row-chip and keep shrink 0). */
+.gmail-row-content > span:not(.gmail-row-chip) {
+  flex-shrink: 1000;
 }
 
 .gmail-row-date {
@@ -397,6 +508,114 @@
   color: var(--gm-text-faint);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* Category / waiting-age pill at the right edge of the content column. */
+.gmail-row-chip {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--gm-border);
+  border-radius: 999px;
+  color: var(--gm-text-faint);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* Two chips on one row (category + status): only the first takes the auto
+   margin; the second sits right next to it, so the pair clusters at the
+   right edge instead of spreading across the free space. */
+.gmail-row-chip + .gmail-row-chip {
+  margin-left: 6px;
+}
+
+.gmail-row-chip-waiting {
+  border-color: transparent;
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gmail-row-chip-ready {
+  border-color: transparent;
+  background: var(--gm-bg-row-selected);
+  color: var(--gm-accent);
+}
+
+/* Shown in place of the "Needs you" section when it's empty. */
+.gmail-caughtup {
+  padding: 18px 24px;
+  color: var(--gm-text-faint);
+  font-size: 13px;
+}
+
+/* Category filter pills under the "Everything else" header. */
+.gmail-category-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--gm-border);
+}
+
+.gmail-category-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border: 1px solid var(--gm-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gm-text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.gmail-category-pill:hover {
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-strong);
+}
+
+.gmail-category-pill-active {
+  background: var(--gm-bg-row-selected);
+  border-color: var(--gm-accent);
+  color: var(--gm-text-strong);
+}
+
+.gmail-category-pill-count {
+  color: var(--gm-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.gmail-category-pill-archive {
+  margin-left: auto;
+  border-color: transparent;
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-strong);
+}
+
+.gmail-category-pill-archive:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The category chip in the thread-detail toolbar is a button (dropdown trigger). */
+.gmail-category-chip {
+  flex-shrink: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.gmail-category-chip:hover {
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-strong);
 }
 
 .gmail-detail {
@@ -411,10 +630,48 @@
   border-top: 1px solid var(--gm-border);
   border-bottom: 1px solid var(--gm-border);
   box-shadow: inset 2px 0 0 var(--gm-accent);
+  /* Replays whenever the detail is shown — hidden details are display: none,
+     so un-hiding restarts the animation. */
+  animation: gmail-detail-open 140ms ease-out;
 }
 
 .gmail-detail-hidden {
   display: none;
+}
+
+@keyframes gmail-detail-open {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The inline reply/forward composer pops in from below the thread. */
+.gmail-compose-inline {
+  animation: gmail-compose-open 140ms ease-out;
+}
+
+@keyframes gmail-compose-open {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gmail-detail-inline,
+  .gmail-compose-inline,
+  .gmail-row-group-leaving {
+    animation: none;
+  }
 }
 
 .gmail-detail-toolbar {
@@ -466,6 +723,35 @@
   color: var(--gm-text);
   font-size: 13px;
   line-height: 1.55;
+}
+
+/* People on the thread who have a knowledge note — one click to open it. */
+.gmail-thread-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.gmail-thread-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--gm-border);
+  border-radius: 999px;
+  background: var(--gm-bg-pill);
+  color: var(--gm-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.gmail-thread-person:hover {
+  background: var(--gm-bg-pill-hover);
+  color: var(--gm-text-strong);
+  border-color: var(--gm-border-strong);
 }
 
 .gmail-message-stack {
@@ -707,409 +993,76 @@
   border-color: var(--gm-border-strong);
 }
 
-.gmail-compose-card {
-  max-width: 720px;
-  margin-left: 40px;
-  border: 1px solid var(--gm-border-strong);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--gm-bg-card);
-}
-
-.gmail-compose-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 32px;
-  padding: 0 12px;
-  background: var(--gm-bg-input);
-  color: var(--gm-text-body);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  text-transform: uppercase;
-}
-
-.gmail-compose-header button,
-.gmail-compose-link {
-  border: none;
-  background: transparent;
-  color: var(--gm-text-muted);
-  cursor: pointer;
-}
-
-.gmail-compose-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--gm-border);
-  color: var(--gm-text-muted);
-  font-size: 12px;
-}
-
-.gmail-compose-line input {
-  min-width: 0;
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--gm-text);
-  font: inherit;
-}
-
-.gmail-compose-label {
-  flex: none;
-  min-width: 28px;
-  color: var(--gm-text-muted);
-}
-
-.gmail-compose-subject-input {
-  min-width: 0;
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--gm-text);
-  font: inherit;
-}
-
-/* Recipient (To / Cc / Bcc) rows with editable chips */
-.gmail-recipient-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-height: 34px;
-  padding: 5px 12px;
-  border-bottom: 1px solid var(--gm-border);
-  font-size: 13px;
-}
-
-.gmail-recipient-label {
-  flex: none;
-  min-width: 28px;
-  padding-top: 5px;
-  color: var(--gm-text-muted);
-}
-
-.gmail-recipient-field {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-}
-
-.gmail-recipient-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  height: 24px;
-  padding: 0 4px 0 10px;
-  border-radius: 12px;
-  background: var(--gm-bg-pill);
-  color: var(--gm-text);
-  font-size: 12px;
-  line-height: 1;
-}
-
-.gmail-recipient-chip-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 240px;
-}
-
-.gmail-recipient-chip-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--gm-text-muted);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.gmail-recipient-chip-remove:hover {
-  background: var(--gm-bg-pill-hover);
-  color: var(--gm-text);
-}
-
-.gmail-recipient-input {
-  flex: 1 1 80px;
-  min-width: 80px;
-  height: 24px;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--gm-text);
-  font: inherit;
-  font-size: 13px;
-}
-
-.gmail-recipient-trailing {
-  flex: none;
-  padding-top: 5px;
-}
-
-.gmail-recipient-toggles {
-  display: flex;
-  gap: 10px;
-}
-
-.gmail-recipient-toggles button {
-  border: none;
-  background: transparent;
-  color: var(--gm-text-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.gmail-recipient-toggles button:hover {
-  color: var(--gm-text);
-  text-decoration: underline;
-}
-
-.gmail-compose-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-}
-
-.gmail-compose-link-popover {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--gm-border);
-  background: var(--gm-bg-input);
-}
-
-.gmail-compose-link-popover input {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--gm-border-strong);
-  border-radius: 4px;
-  background: var(--gm-bg-card);
-  color: var(--gm-text);
-  font: inherit;
-  font-size: 12px;
-  outline: none;
-}
-
-.gmail-compose-link-popover input:focus {
-  border-color: var(--gm-accent);
-}
-
-.gmail-compose-link-popover button {
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--gm-border-strong);
-  border-radius: 4px;
-  background: var(--gm-bg-pill);
-  color: var(--gm-text);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.gmail-compose-link-popover button:hover {
-  background: var(--gm-bg-pill-hover);
-}
-
-.gmail-compose-link-popover-apply {
-  background: var(--gm-accent) !important;
-  border-color: var(--gm-accent) !important;
-  color: var(--gm-accent-fg) !important;
-  font-weight: 600;
-}
-
-.gmail-compose-link-popover-apply:hover {
-  background: var(--gm-accent-hover) !important;
-  border-color: var(--gm-accent-hover) !important;
-}
-
-.gmail-compose-tool {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--gm-text-muted);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.gmail-compose-tool:hover {
-  background: var(--gm-bg-pill-hover);
-  color: var(--gm-text);
-}
-
-.gmail-compose-tool.is-active {
-  background: var(--gm-bg-pill-hover);
-  color: var(--gm-accent);
-}
-
-.gmail-compose-tool-sep {
-  display: inline-block;
-  width: 1px;
-  height: 18px;
-  margin: 0 6px;
-  background: var(--gm-border-strong);
-}
-
-.gmail-compose-editor {
-  display: block;
-  width: 100%;
-  max-height: 360px;
-  overflow-y: auto;
-}
-
-.gmail-compose-content {
+/* Email composer body — Tiptap content, styled to the app's design system. */
+.compose-content {
   outline: none;
   min-height: 120px;
   padding: 12px;
   background: transparent;
-  color: var(--gm-text);
-  font: 13px/1.55 inherit;
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
-.gmail-compose-content p {
+.compose-content p {
   margin: 0;
 }
 
-.gmail-compose-content p + p,
-.gmail-compose-content p + ul,
-.gmail-compose-content p + ol,
-.gmail-compose-content p + blockquote {
+.compose-content p + p,
+.compose-content p + ul,
+.compose-content p + ol,
+.compose-content p + blockquote {
   margin-top: 8px;
 }
 
-.gmail-compose-content ul,
-.gmail-compose-content ol {
+.compose-content ul,
+.compose-content ol {
   margin: 0;
   padding-left: 22px;
 }
 
-.gmail-compose-content ul {
+.compose-content ul {
   list-style: disc;
 }
 
-.gmail-compose-content ol {
+.compose-content ol {
   list-style: decimal;
 }
 
-.gmail-compose-content li {
+.compose-content li {
   margin: 2px 0;
 }
 
-.gmail-compose-content li > p {
+.compose-content li > p {
   margin: 0;
 }
 
-.gmail-compose-content blockquote {
+.compose-content blockquote {
   margin: 4px 0;
   padding-left: 12px;
-  border-left: 2px solid var(--gm-border-strong);
-  color: var(--gm-text-muted);
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
 }
 
-.gmail-compose-content a {
-  color: var(--gm-accent);
+.compose-content a {
+  color: var(--primary);
   text-decoration: underline;
 }
 
-.gmail-compose-content code {
+.compose-content code {
   padding: 1px 4px;
   border-radius: 3px;
-  background: var(--gm-bg-pill-hover);
+  background: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 0.8125rem;
 }
 
-.gmail-compose-content p.is-editor-empty:first-child::before {
+.compose-content p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
-  color: var(--gm-placeholder);
+  color: var(--muted-foreground);
   float: left;
   height: 0;
   pointer-events: none;
-}
-
-.gmail-compose-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--gm-border);
-}
-
-.gmail-compose-actions-primary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.gmail-refine-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  height: 30px;
-  padding: 0 14px;
-  border: 1px solid var(--gm-border-strong);
-  border-radius: 6px;
-  background: var(--gm-bg-pill);
-  color: var(--gm-text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.gmail-refine-button:hover {
-  background: var(--gm-bg-pill-hover);
-  border-color: var(--gm-accent);
-  color: var(--gm-accent);
-}
-
-.gmail-send-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  height: 30px;
-  padding: 0 14px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: var(--gm-accent);
-  color: var(--gm-accent-fg);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.gmail-send-button:hover {
-  background: var(--gm-accent-hover);
 }
 
 .gmail-empty-state {
@@ -1124,6 +1077,8 @@
 }
 
 @theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -1164,99 +1119,140 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Design language tokens — see DESIGN_LANGUAGE.md.
+   Layering: canvas (#fff) is the floor; the sidebar sits beside it one step
+   darker with no border (the value shift is the border); floating surfaces are
+   raised white with hairline ring + shadow; inputs recess with no border.
+   Black is the action color; blue is links/toggles/focus only. */
 :root {
-  --radius: 0.5rem;
-  --background: var(--bg-color, oklch(1 0 0));
-  --foreground: var(--text-color, oklch(0.145 0 0));
-  --card: var(--bg-color, oklch(1 0 0));
-  --card-foreground: var(--text-color, oklch(0.145 0 0));
-  --popover: var(--bg-color, oklch(1 0 0));
-  --popover-foreground: var(--text-color, oklch(0.145 0 0));
-  --primary: var(--main-color, oklch(0.205 0 0));
-  --primary-foreground: var(--bg-color, oklch(0.985 0 0));
-  --secondary: var(--sub-alt-color, oklch(0.97 0 0));
-  --secondary-foreground: var(--text-color, oklch(0.205 0 0));
-  --muted: var(--sub-alt-color, oklch(0.97 0 0));
-  --muted-foreground: var(--sub-color, oklch(0.556 0 0));
-  --accent: var(--sub-color, oklch(0.97 0 0));
-  --accent-foreground: var(--text-color, oklch(0.205 0 0));
-  --destructive: var(--error-color, oklch(0.577 0.245 27.325));
-  --border: var(--sub-alt-color, oklch(0.922 0 0));
-  --input: var(--sub-alt-color, oklch(0.922 0 0));
-  --ring: var(--main-color, oklch(0.708 0 0));
+  --radius: 0.625rem; /* 10px — shadcn xl→18 popovers, 2xl→24 composer */
+  --background: #ffffff;
+  --foreground: #0d0d0d;
+  --card: #ffffff;
+  --card-foreground: #0d0d0d;
+  --popover: #ffffff;
+  --popover-foreground: #0d0d0d;
+  --primary: #0d0d0d;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f0;
+  --secondary-foreground: #0d0d0d;
+  --muted: #f1f1f1;
+  --muted-foreground: #8f8f8f;
+  --accent: rgba(0, 0, 0, 0.05);
+  --accent-foreground: #0d0d0d;
+  --destructive: #e5484d;
+  --border: rgba(0, 0, 0, 0.07);
+  --input: rgba(0, 0, 0, 0.12);
+  --ring: #3478f6;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: var(--bg-color, oklch(0.985 0 0));
-  --sidebar-foreground: var(--text-color, oklch(0.145 0 0));
-  --sidebar-primary: var(--main-color, oklch(0.205 0 0));
-  --sidebar-primary-foreground: var(--bg-color, oklch(0.985 0 0));
-  --sidebar-accent: var(--sub-color, oklch(0.9 0 0));
-  --sidebar-accent-foreground: var(--text-color, oklch(0.205 0 0));
-  --sidebar-border: var(--sub-alt-color, oklch(0.922 0 0));
-  --sidebar-ring: var(--main-color, oklch(0.708 0 0));
-  --scrollbar-track: oklch(0.95 0 0);
-  --scrollbar-thumb: oklch(0.75 0 0);
-  --scrollbar-thumb-hover: oklch(0.65 0 0);
+  --sidebar: #f4f4f4;
+  --sidebar-foreground: #0d0d0d;
+  --sidebar-primary: #0d0d0d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(0, 0, 0, 0.06);
+  --sidebar-accent-foreground: #0d0d0d;
+  --sidebar-border: transparent;
+  --sidebar-ring: #3478f6;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
   /* Subtle raised-card surface: tints toward foreground, so it reads a hair
      darker than the background in light mode and a hair lighter in dark mode.
      Shared by the web search card and tool-call group. */
   --card-surface: color-mix(in oklab, var(--background) 98.5%, var(--foreground));
-  --rowboat-panel: oklch(0.97 0 0);
-  --rowboat-raised: oklch(1 0 0);
-  --rowboat-wash: color-mix(in oklab, var(--background) 88%, var(--primary) 12%);
-  --rowboat-hairline: color-mix(in oklab, var(--border) 78%, var(--foreground) 22%);
-  --rowboat-command: oklch(0.205 0 0);
-  --rowboat-attention: oklch(0.646 0.222 41.116);
-  --rowboat-shadow: 0 1px 2px rgb(31 38 48 / 0.07), 0 18px 40px rgb(31 38 48 / 0.08);
-  --rowboat-shadow-soft: 0 1px 2px rgb(31 38 48 / 0.05), 0 8px 24px rgb(31 38 48 / 0.06);
+  /* The header row every section draws directly under the titlebar: toolbars,
+     rail headers, pane headers, the chat header. One height so the rules line
+     up across adjacent panes; the Spaces header set the standard. */
+  --rowboat-header: 56px;
+  --rowboat-panel: #f4f4f4;
+  /* Second-level rail (e.g. the Spaces topics rail): one step lighter than
+     the main sidebar so adjacent rails read as distinct layers. */
+  --rowboat-panel-soft: #fafafa;
+  --rowboat-raised: #ffffff;
+  --rowboat-wash: #ebebeb;
+  --rowboat-hairline: rgba(0, 0, 0, 0.12);
+  --rowboat-command: #0d0d0d;
+  --rowboat-attention: #e5484d;
+  --rowboat-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --rowboat-shadow-soft: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+  /* Language extensions */
+  --rowboat-link: #3478f6;
+  --rowboat-success: #1ea446;
+  --rowboat-git: #8b5cf6;
+  --rowboat-bubble: #0d0d0d;
+  --rowboat-bubble-foreground: #ffffff;
+  --rowboat-ink-secondary: #5d5d5d;
+  /* Spaces stream — the multiplayer dialect (team chat only). Its link ink
+     is a teal-leaning navy, not the app-wide blue. */
+  --stream-link: #1264a3;
+  --stream-mention-wash: rgba(29, 155, 209, 0.13);
+  --stream-you-wash: rgba(242, 199, 68, 0.3);
+  --stream-you-ink: #97620f;
+  /* The unread badge's dot when something is for you (sidebar, rail). Red is
+     the one hue reserved for "someone wants you"; nothing else in Spaces uses it. */
+  --stream-alert: #d5382b;
 }
 
 .dark {
-  --background: var(--bg-color, oklch(0.145 0 0));
-  --foreground: var(--text-color, oklch(0.985 0 0));
-  --card: var(--bg-color, oklch(0.205 0 0));
-  --card-foreground: var(--text-color, oklch(0.985 0 0));
-  --popover: var(--bg-color, oklch(0.205 0 0));
-  --popover-foreground: var(--text-color, oklch(0.985 0 0));
-  --primary: var(--main-color, oklch(0.922 0 0));
-  --primary-foreground: var(--bg-color, oklch(0.205 0 0));
-  --secondary: var(--sub-alt-color, oklch(0.269 0 0));
-  --secondary-foreground: var(--text-color, oklch(0.985 0 0));
-  --muted: var(--sub-alt-color, oklch(0.269 0 0));
-  --muted-foreground: var(--sub-color, oklch(0.708 0 0));
-  --accent: var(--sub-color, oklch(0.269 0 0));
-  --accent-foreground: var(--text-color, oklch(0.985 0 0));
-  --destructive: var(--error-color, oklch(0.704 0.191 22.216));
-  --border: var(--sub-alt-color, oklch(1 0 0 / 10%));
-  --input: var(--sub-alt-color, oklch(1 0 0 / 15%));
-  --ring: var(--main-color, oklch(0.556 0 0));
+  --background: #212121;
+  --foreground: #ececec;
+  --card: #2a2a2a;
+  --card-foreground: #ececec;
+  --popover: #2a2a2a;
+  --popover-foreground: #ececec;
+  --primary: #ececec;
+  --primary-foreground: #0d0d0d;
+  --secondary: #303030;
+  --secondary-foreground: #ececec;
+  --muted: #2e2e2e;
+  --muted-foreground: #8a8a8a;
+  --accent: rgba(255, 255, 255, 0.06);
+  --accent-foreground: #ececec;
+  --destructive: #f2555a;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #5b94ff;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: var(--bg-color, oklch(0.205 0 0));
-  --sidebar-foreground: var(--text-color, oklch(0.985 0 0));
-  --sidebar-primary: var(--main-color, oklch(0.488 0.243 264.376));
-  --sidebar-primary-foreground: var(--bg-color, oklch(0.985 0 0));
-  --sidebar-accent: var(--sub-color, oklch(0.35 0 0));
-  --sidebar-accent-foreground: var(--text-color, oklch(0.985 0 0));
-  --sidebar-border: var(--sub-alt-color, oklch(1 0 0 / 10%));
-  --sidebar-ring: var(--main-color, oklch(0.556 0 0));
-  --scrollbar-track: oklch(0.2 0 0);
-  --scrollbar-thumb: oklch(0.4 0 0);
-  --scrollbar-thumb-hover: oklch(0.5 0 0);
-  --rowboat-panel: oklch(0.269 0 0);
-  --rowboat-raised: oklch(0.205 0 0);
-  --rowboat-wash: color-mix(in oklab, var(--background) 80%, var(--primary) 20%);
-  --rowboat-hairline: color-mix(in oklab, var(--border) 70%, var(--foreground) 30%);
-  --rowboat-command: oklch(0.922 0 0);
-  --rowboat-attention: oklch(0.769 0.188 70.08);
-  --rowboat-shadow: 0 1px 2px rgb(0 0 0 / 0.24), 0 22px 44px rgb(0 0 0 / 0.28);
-  --rowboat-shadow-soft: 0 1px 2px rgb(0 0 0 / 0.2), 0 12px 28px rgb(0 0 0 / 0.18);
+  --sidebar: #171717;
+  --sidebar-foreground: #ececec;
+  --sidebar-primary: #ececec;
+  --sidebar-primary-foreground: #0d0d0d;
+  --sidebar-accent: rgba(255, 255, 255, 0.09);
+  --sidebar-accent-foreground: #ececec;
+  --sidebar-border: transparent;
+  --sidebar-ring: #5b94ff;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --card-surface: #2a2a2a;
+  --rowboat-panel: #171717;
+  --rowboat-panel-soft: #1c1c1c;
+  --rowboat-raised: #2a2a2a;
+  --rowboat-wash: #303030;
+  --rowboat-hairline: rgba(255, 255, 255, 0.14);
+  --rowboat-command: #ececec;
+  --rowboat-attention: #f2555a;
+  --rowboat-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --rowboat-shadow-soft: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --rowboat-link: #5b94ff;
+  --rowboat-success: #3dcb70;
+  --rowboat-git: #a78bfa;
+  --rowboat-bubble: #303030;
+  --rowboat-bubble-foreground: #ececec;
+  --rowboat-ink-secondary: #a6a6a6;
+  --stream-link: #1d9bd1;
+  --stream-mention-wash: rgba(29, 155, 209, 0.2);
+  --stream-you-wash: rgba(242, 199, 68, 0.22);
+  --stream-you-ink: #e8c25e;
+  --stream-alert: #f0665b;
 }
 
 @layer base {
@@ -1268,9 +1264,10 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    /* The system font is the identity — SF Pro on macOS. */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
 
   ::-webkit-scrollbar {
@@ -1296,21 +1293,145 @@
   background: var(--background);
 }
 
-.rowboat-sidebar [data-sidebar="sidebar"] {
+/* ---- Dock sidebar: the collapsed left navigation as a slim icon rail ---- */
+
+.rowboat-dock {
+  position: fixed;
+  /* Below the titlebar band: the traffic lights are wider than the rail, so
+     the h-10 top row stays one full-width surface (the gutter strip in App
+     paints its left segment) and the rail hangs underneath, Linear-style. */
+  top: 2.5rem;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
   background: var(--sidebar);
-  border-right: 1px solid var(--sidebar-border);
+  border-right: 1px solid var(--border);
 }
 
+.rowboat-dock-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--rowboat-attention);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3.5px;
+  border: 1.5px solid var(--sidebar);
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.rowboat-dock-badge-amber {
+  background: #d97706;
+}
+
+.rowboat-dock-notification {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--sidebar);
+  border-radius: 999px;
+  box-sizing: content-box;
+  z-index: 2;
+}
+
+.rowboat-dock-notification-muted {
+  background: var(--muted-foreground);
+}
+
+.rowboat-dock-notification-alert {
+  background: var(--stream-alert);
+}
+
+.rowboat-dock-tip {
+  position: fixed;
+  transform: translateY(-50%);
+  background: var(--rowboat-bubble);
+  color: var(--rowboat-bubble-foreground);
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  z-index: 40;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rowboat-dock-tip-status {
+  font-size: 11px;
+  font-weight: 400;
+  color: color-mix(in oklab, var(--rowboat-bubble-foreground) 72%, transparent);
+  white-space: nowrap;
+}
+
+.rowboat-dock-tip-status-alert {
+  color: #ff9d94;
+}
+
+.rowboat-dock-flyout {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 296px;
+  max-height: 70%;
+  overflow: auto;
+  background: var(--rowboat-raised);
+  border: 1px solid transparent;
+  border-radius: 18px;
+  box-shadow: var(--rowboat-shadow);
+  padding: 12px;
+  z-index: 35;
+  animation: rowboat-dock-flyin 0.18s ease-out;
+}
+
+@keyframes rowboat-dock-flyin {
+  from {
+    opacity: 0;
+    transform: translateX(-14px) translateY(-50%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(-50%);
+  }
+}
+
+/* The ⌥Tab switcher pill: same dark bubble surface as the rail tooltips,
+   so the monochrome glyphs pop against it. */
+.rowboat-dock-switcher {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  background: var(--rowboat-bubble);
+  border-radius: 14px;
+  box-shadow: var(--rowboat-shadow);
+}
+
+/* The sidebar carries no internal borders — spacing does the separating. */
 .rowboat-sidebar [data-sidebar="header"] {
   gap: 0.625rem;
-  border-bottom: 1px solid color-mix(in oklab, var(--sidebar-border) 76%, transparent);
+  border-bottom: none;
   background: var(--sidebar);
 }
 
 .rowboat-section-switcher {
-  border: 1px solid color-mix(in oklab, var(--sidebar-border) 78%, transparent);
-  background: color-mix(in oklab, var(--sidebar-accent) 58%, var(--sidebar) 42%);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent);
+  border: none;
+  background: var(--rowboat-wash);
+  box-shadow: none;
 }
 
 .rowboat-section-switcher button {
@@ -1319,7 +1440,7 @@
 
 .rowboat-section-switcher button[class*="shadow-sm"] {
   background: var(--rowboat-raised);
-  box-shadow: var(--rowboat-shadow-soft);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .rowboat-quick-actions button {
@@ -1331,12 +1452,18 @@
 }
 
 .rowboat-tabbar {
-  background: color-mix(in oklab, var(--background) 78%, var(--muted) 22%);
+  background: var(--background);
 }
 
 .rowboat-titlebar {
   background: var(--background);
-  border-bottom-color: color-mix(in oklab, var(--border) 82%, transparent);
+  border-bottom-color: var(--border);
+}
+
+/* A section's header row (see --rowboat-header). min-height, like the Spaces
+   header, so a row whose content wraps can still grow. */
+.rowboat-header {
+  min-height: var(--rowboat-header);
 }
 
 .rowboat-tab {
@@ -1347,37 +1474,43 @@
 .rowboat-tab[class*="bg-background"] {
   border-bottom-color: var(--primary);
   background: var(--rowboat-raised);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 8%, transparent);
+  box-shadow: none;
 }
 
 .rowboat-composer-dock {
-  box-shadow: 0 -20px 44px color-mix(in oklab, var(--background) 78%, transparent);
+  box-shadow: none;
 }
 
+/* Composer: raised surface, real hairline border (a ring-in-shadow gets
+   painted over by the dock's scroll-fade gradient at the top seam) plus a soft
+   blur. No blue focus ring — the caret is the focus signal. */
 .rowboat-chat-input {
-  border-color: color-mix(in oklab, var(--border) 74%, var(--primary) 26%);
+  border-color: var(--border);
   background: var(--rowboat-raised);
-  box-shadow: var(--rowboat-shadow);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.06);
 }
 
 .rowboat-chat-input:focus-within {
-  border-color: color-mix(in oklab, var(--ring) 76%, var(--border) 24%);
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--ring) 38%, transparent),
-    var(--rowboat-shadow);
+  border-color: var(--border);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.06);
 }
 
 [data-slot="message-content"] {
   line-height: 1.62;
 }
 
-.is-user [data-slot="message-content"] {
-  background: color-mix(in oklab, var(--secondary) 88%, var(--rowboat-wash) 12%);
-  border: 1px solid color-mix(in oklab, var(--border) 68%, transparent);
-}
+/* User messages are ink-dark bubbles (radius 22, no border) and
+   assistant messages are plain prose on the canvas. Both are styled by the
+   MessageContent component classes (ai-elements/message.tsx) so callers can
+   still opt out (e.g. transparent attachment-only messages). */
 
-.is-assistant [data-slot="message-content"] {
-  color: color-mix(in oklab, var(--foreground) 94%, var(--muted-foreground) 6%);
+/* Inside the ink-dark user bubble, inline code keeps the bubble's light ink
+   over a faint overlay — per the reference, not a light chip. Unlayered on
+   purpose: Streamdown puts bg-muted on inline code as a utility class, which
+   outranks any @layer components rule. */
+.is-user [data-slot="message-content"] code:not(pre code) {
+  background: rgba(255, 255, 255, 0.09);
+  color: inherit;
 }
 
 /* Markdown content base styles for Streamdown/MessageResponse */
@@ -1414,7 +1547,7 @@
     @apply my-2 font-semibold first:mt-0;
   }
   [data-slot="message-content"] code:not(pre code) {
-    @apply rounded bg-muted px-1.5 py-0.5 font-mono text-sm;
+    @apply rounded-[6px] bg-muted px-1.5 py-0.5 font-mono text-[13px];
   }
   [data-slot="message-content"] pre {
     @apply my-3 overflow-x-auto rounded-lg;
@@ -1426,7 +1559,8 @@
     @apply my-4 border-border;
   }
   [data-slot="message-content"] a {
-    @apply text-primary underline underline-offset-2 hover:text-primary/80;
+    color: var(--rowboat-link);
+    @apply no-underline underline-offset-2 hover:underline;
   }
   [data-slot="message-content"] table {
     @apply my-3 w-full border-collapse;
@@ -1450,7 +1584,7 @@
 }
 
 .graph-view {
-  background-color: var(--background);
+  background-color: var(--rowboat-panel-soft);
   user-select: none;
 }
 
@@ -1530,4 +1664,84 @@
     opacity: 1;
     transform: translateX(-120%);
   }
+}
+
+/* Issue #749: BiDi. unicode-bidi:plaintext resolves direction PER BLOCK from
+   its first strong character, so a message mixing English + RTL paragraphs
+   aligns each block correctly. text-align:start follows the resolved dir. */
+.bidi-auto :is(p,h1,h2,h3,h4,h5,h6,li,blockquote,td,th){unicode-bidi:plaintext;text-align:start;}
+/* Code is inherently LTR — keep it stable inside RTL messages. */
+.bidi-auto :is(pre,code,kbd,samp){direction:ltr;unicode-bidi:isolate;text-align:left;}
+
+/* Turn usage footer (token menu + effort label): hidden until the turn is
+   hovered. `*:hover + …` reveals it when the element directly above it — the
+   turn's last message — is hovered; the :has() keeps it pinned while its
+   dropdown is open. */
+[data-turn-usage] {
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+[data-turn-usage]:hover,
+[data-turn-usage]:focus-within,
+[data-turn-usage]:has([data-state="open"]),
+*:hover + [data-turn-usage] {
+  opacity: 1;
+}
+
+/* Code rail: the working session's status dot ripples — a soft ring
+   swelling off the dot and fading, with a quiet beat between pulses — so
+   the live session reads at a glance without lighting its card. */
+@keyframes code-dot-ripple {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--rowboat-git) 45%, transparent); }
+  60%, 100% { box-shadow: 0 0 0 5px transparent; }
+}
+.code-working-dot {
+  animation: code-dot-ripple 2.4s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-working-dot { animation: none; }
+}
+
+
+/* Code session empty state: the block cursor after the display line. A
+   stepped blink like a real terminal's — it snaps, never fades. Reduced
+   motion keeps it solid. */
+@keyframes code-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.code-cursor-blink {
+  animation: code-cursor-blink 1.06s step-end infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .code-cursor-blink { animation: none; }
+}
+
+/* Spaces columns: a column opening grows from 0 to its width (content is
+   fixed at that width and anchored to the far edge, so it slides in rather
+   than wipes); closing runs the same in reverse. --rb-col-w is set inline. */
+@keyframes rb-column-in { from { width: 0; } to { width: var(--rb-col-w); } }
+@keyframes rb-column-out { from { width: var(--rb-col-w); } to { width: 0; } }
+
+/* Caffeinate toggle (top-left cluster): while on, the three steam ticks above the
+   lucide coffee cup rise a hair and dissipate, staggered so they ripple
+   rather than pulse. Negative delays start each tick mid-cycle, so nothing
+   pops when the class lands. The cup (3rd path) stays still. Reduced motion
+   keeps the steam static — the amber tint does the work. */
+@keyframes caffeinate-steam {
+  0%   { transform: translateY(0.5px); opacity: 0; }
+  30%  { opacity: 1; }
+  100% { transform: translateY(-1.5px); opacity: 0; }
+}
+.caffeinate-steam { overflow: visible; }
+.caffeinate-steam path:nth-child(1),
+.caffeinate-steam path:nth-child(2),
+.caffeinate-steam path:nth-child(4) {
+  animation: caffeinate-steam 2.2s ease-out infinite;
+}
+.caffeinate-steam path:nth-child(4) { animation-delay: 0s; }     /* left */
+.caffeinate-steam path:nth-child(1) { animation-delay: -0.75s; } /* middle */
+.caffeinate-steam path:nth-child(2) { animation-delay: -1.5s; }  /* right */
+@media (prefers-reduced-motion: reduce) {
+  .caffeinate-steam path { animation: none; }
 }

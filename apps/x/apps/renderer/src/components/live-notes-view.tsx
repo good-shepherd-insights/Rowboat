@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/switch'
 import { stripKnowledgePrefix, wikiLabel } from '@/lib/wiki-links'
 import { toast } from '@/lib/toast'
 import { formatRelativeTime } from '@/lib/relative-time'
+import * as analytics from '@/lib/analytics'
 import { useLiveNoteAgentStatus } from '@/hooks/use-live-note-agent-status'
 
 type LiveNoteRow = {
@@ -145,6 +146,7 @@ export function LiveNotesView({ onOpenNote, onAddNewLiveNote }: LiveNotesViewPro
         throw new Error(result.error ?? 'Failed to update live-note state')
       }
 
+      analytics.liveNoteToggled(active)
       setNotes((prev) => prev.map((entry) => (
         entry.path === note.path
           ? {
@@ -173,6 +175,7 @@ export function LiveNotesView({ onOpenNote, onAddNewLiveNote }: LiveNotesViewPro
     try {
       const knowledgeRelative = note.path.replace(/^knowledge\//, '')
       const result = await window.ipc.invoke('live-note:stop', { filePath: knowledgeRelative })
+      if (result.success) analytics.liveNoteStopped()
       if (!result.success && result.error) {
         toast(result.error, 'error')
       }
@@ -235,10 +238,10 @@ export function LiveNotesView({ onOpenNote, onAddNewLiveNote }: LiveNotesViewPro
               </colgroup>
               <thead>
                 <tr className="border-b border-border/60 bg-muted/30 text-left">
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Note</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Created</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Last ran</th>
-                  <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">State</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Note</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Created</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">Last ran</th>
+                  <th className="px-4 py-3 text-[13px] text-muted-foreground">State</th>
                 </tr>
               </thead>
               <tbody>

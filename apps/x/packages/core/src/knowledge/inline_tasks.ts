@@ -3,13 +3,11 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import { generateText } from 'ai';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage, fetchRun } from '../runs/runs.js';
-import { getKgModel } from '../models/defaults.js';
-import container from '../di/container.js';
-import type { IModelConfigRepo } from '../models/repo.js';
-import { createProvider } from '../models/models.js';
+import { runWhenPossible } from '../runtime/assembly/headless-app.js';
+import { asRunModelOptions, getKgModel, resolveProviderConfig } from '../models/defaults.js';
+import { directCallReasoningOptions } from '../models/reasoning.js';
+import { createLanguageModel } from '../models/models.js';
 import { inlineTask } from '@x/shared';
-import { extractAgentResponse, waitForRunCompletion } from '../agents/utils.js';
 import { captureLlmUsage } from '../analytics/usage.js';
 import { withUseCase } from '../analytics/use_case.js';
 
@@ -470,13 +468,6 @@ async function processInlineTasks(): Promise<void> {
             console.log(`[InlineTasks] Running task: "${task.instruction.slice(0, 80)}..."`);
 
             try {
-                const run = await createRun({
-                    agentId: INLINE_TASK_AGENT,
-                    model: await getKgModel(),
-                    useCase: 'knowledge_sync',
-                    subUseCase: 'inline_task_run',
-                });
-
                 const message = [
                     `Execute the following instruction from the note "${relativePath}":`,
                     '',
@@ -488,10 +479,13 @@ async function processInlineTasks(): Promise<void> {
                     '```',
                 ].join('\n');
 
-                await createMessage(run.id, message);
-                await waitForRunCompletion(run.id);
-
-                const result = await extractAgentResponse(run.id);
+                const { summary: result } = await runWhenPossible({
+                    agentId: INLINE_TASK_AGENT,
+                    message,
+                    useCase: 'knowledge_sync',
+                    subUseCase: 'inline_task_run',
+                    ...asRunModelOptions(await getKgModel()),
+                });
                 if (result) {
                     if (task.targetId) {
                         // Recurring task with target region — replace content inside the region
@@ -555,13 +549,6 @@ export async function processRowboatInstruction(
     scheduleLabel: string | null;
     response: string | null;
 }> {
-    const run = await createRun({
-        agentId: INLINE_TASK_AGENT,
-        model: await getKgModel(),
-        useCase: 'knowledge_sync',
-        subUseCase: 'inline_task_run',
-    });
-
     const message = [
         `Process the following @rowboat instruction from the note "${notePath}":`,
         '',
@@ -573,10 +560,13 @@ export async function processRowboatInstruction(
         '```',
     ].join('\n');
 
-    await createMessage(run.id, message);
-    await waitForRunCompletion(run.id);
-
-    const rawResponse = await extractAgentResponse(run.id);
+    const { summary: rawResponse } = await runWhenPossible({
+        agentId: INLINE_TASK_AGENT,
+        message,
+        useCase: 'knowledge_sync',
+        subUseCase: 'inline_task_run',
+        ...asRunModelOptions(await getKgModel()),
+    });
     if (!rawResponse) {
         return { instruction, schedule: null, scheduleLabel: null, response: null };
     }
@@ -624,10 +614,10 @@ export async function processRowboatInstruction(
  * Returns a schedule object or null for one-time tasks.
  */
 export async function classifySchedule(instruction: string): Promise<InlineTaskSchedule | null> {
-    const repo = container.resolve<IModelConfigRepo>('modelConfigRepo');
-    const config = await repo.getConfig();
-    const provider = createProvider(config.provider);
-    const model = provider.languageModel(config.model);
+    const selection = await getKgModel();
+    const providerConfig = await resolveProviderConfig(selection.provider);
+    const model = createLanguageModel(providerConfig, selection.model);
+    const reasoning = await directCallReasoningOptions(providerConfig.flavor, selection.model, selection.effort);
 
     const now = new Date();
     const defaultEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -667,15 +657,16 @@ Respond with ONLY valid JSON: either a schedule object or null. No other text.`;
     try {
         const result = await withUseCase({ useCase: 'knowledge_sync', subUseCase: 'inline_task_classify' }, () => generateText({
             model,
-            system: systemPrompt,
+            instructions: systemPrompt,
             prompt: instruction,
+            ...reasoning,
         }));
 
         captureLlmUsage({
             useCase: 'knowledge_sync',
             subUseCase: 'inline_task_classify',
-            model: config.model,
-            provider: config.provider.flavor,
+            model: selection.model,
+            provider: selection.provider,
             usage: result.usage,
         });
 

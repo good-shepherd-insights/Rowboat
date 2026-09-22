@@ -1,8 +1,8 @@
-import { Loader2, CheckCircle2, ArrowLeft, Calendar, FileText } from "lucide-react"
+import { Loader2, CheckCircle2, ArrowLeft, Calendar } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { GmailIcon, FirefliesIcon } from "../provider-icons"
+import { GmailIcon, OutlookIcon } from "../provider-icons"
 import type { OnboardingState, ProviderState } from "../use-onboarding-state"
 
 interface ConnectAccountsStepProps {
@@ -18,6 +18,7 @@ function ProviderCard({
   providerState,
   onConnect,
   rightSlot,
+  disabledReason,
   index,
 }: {
   name: string
@@ -28,9 +29,12 @@ function ProviderCard({
   providerState?: ProviderState
   onConnect?: () => void
   rightSlot?: React.ReactNode
+  /** When set (and not connected), Connect is disabled and this text replaces the description. */
+  disabledReason?: string
   index: number
 }) {
   const isConnected = providerState?.isConnected ?? false
+  const connectDisabled = !isConnected && Boolean(disabledReason)
 
   return (
     <motion.div
@@ -40,7 +44,7 @@ function ProviderCard({
       className={cn(
         "flex items-center justify-between gap-4 rounded-xl border p-4 transition-colors",
         isConnected
-          ? "border-green-200 bg-green-50/50 dark:border-green-800/50 dark:bg-green-900/10"
+          ? "border-[var(--rowboat-success)]/25 bg-[var(--rowboat-success)]/5"
           : "hover:bg-muted/50"
       )}
     >
@@ -50,7 +54,7 @@ function ProviderCard({
         </div>
         <div className="min-w-0">
           <div className="text-sm font-semibold">{name}</div>
-          <div className="text-xs text-muted-foreground truncate">{description}</div>
+          <div className="text-xs text-muted-foreground truncate">{connectDisabled ? disabledReason : description}</div>
         </div>
       </div>
       <div className="shrink-0">
@@ -58,7 +62,7 @@ function ProviderCard({
           providerState?.isLoading ? (
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           ) : isConnected ? (
-            <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
+            <div className="flex items-center gap-1.5 text-sm text-[var(--rowboat-success)]">
               <CheckCircle2 className="size-4" />
               <span className="font-medium">Connected</span>
             </div>
@@ -66,7 +70,8 @@ function ProviderCard({
             <Button
               size="sm"
               onClick={onConnect}
-              disabled={providerState?.isConnecting}
+              disabled={providerState?.isConnecting || connectDisabled}
+              title={connectDisabled ? disabledReason : undefined}
             >
               {providerState?.isConnecting ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -108,9 +113,9 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
       ) : (
         <div className="space-y-6">
           {/* Email & Calendar */}
-          {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google')) && (
+          {(useComposioForGoogle || useComposioForGoogleCalendar || providers.includes('google') || providers.includes('microsoft')) && (
             <div className="space-y-3">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <span className="text-[13px] text-muted-foreground">
                 Email & Calendar
               </span>
               {useComposioForGoogle ? (
@@ -133,6 +138,25 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   iconColor="text-red-500"
                   providerState={providerStates['google']}
                   onConnect={() => handleConnect('google')}
+                  // Only one email provider at a time — the main process
+                  // enforces this too; the disabled button just explains it.
+                  disabledReason={providerStates.microsoft?.isConnected ? 'Disconnect Microsoft Outlook first' : undefined}
+                  index={cardIndex++}
+                />
+              )}
+              {providers.includes('microsoft') && (
+                <div className="text-center text-xs text-muted-foreground">or</div>
+              )}
+              {providers.includes('microsoft') && (
+                <ProviderCard
+                  name="Microsoft Outlook"
+                  description="Rowboat uses your email and calendar to provide personalized, context-aware assistance"
+                  icon={<OutlookIcon />}
+                  iconBg="bg-sky-500/10"
+                  iconColor="text-sky-500"
+                  providerState={providerStates['microsoft']}
+                  onConnect={() => handleConnect('microsoft')}
+                  disabledReason={providerStates.google?.isConnected ? 'Disconnect Google first' : undefined}
                   index={cardIndex++}
                 />
               )}
@@ -141,8 +165,8 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
                   name="Google Calendar"
                   description="Read meetings and your schedule."
                   icon={<Calendar className="size-5" />}
-                  iconBg="bg-blue-500/10"
-                  iconColor="text-blue-500"
+                  iconBg="bg-secondary"
+                  iconColor="text-foreground"
                   providerState={{ isConnected: googleCalendarConnected, isLoading: googleCalendarLoading, isConnecting: googleCalendarConnecting }}
                   onConnect={handleConnectGoogleCalendar}
                   index={cardIndex++}
@@ -151,45 +175,6 @@ export function ConnectAccountsStep({ state }: ConnectAccountsStepProps) {
             </div>
           )}
 
-          {/* Meeting Notes */}
-          <div className="space-y-3">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Meeting Notes
-            </span>
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: cardIndex++ * 0.06 }}
-              className="flex items-center justify-between gap-4 rounded-xl border border-green-200 bg-green-50/50 dark:border-green-800/50 dark:bg-green-900/10 p-4"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="size-10 rounded-lg flex items-center justify-center shrink-0 bg-green-500/10">
-                  <span className="text-green-500"><FileText className="size-5" /></span>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold">Rowboat Meeting Notes</div>
-                  <div className="text-xs text-muted-foreground truncate">Built in. Ready to use.</div>
-                </div>
-              </div>
-              <div className="shrink-0">
-                <div className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
-                  <CheckCircle2 className="size-4" />
-                </div>
-              </div>
-            </motion.div>
-            {providers.includes('fireflies-ai') && (
-              <ProviderCard
-                name="Fireflies"
-                description="Import existing notes."
-                icon={<FirefliesIcon />}
-                iconBg="bg-amber-500/10"
-                iconColor="text-amber-500"
-                providerState={providerStates['fireflies-ai']}
-                onConnect={() => handleConnect('fireflies-ai')}
-                index={cardIndex++}
-              />
-            )}
-          </div>
         </div>
       )}
 

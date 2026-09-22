@@ -1,13 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { google } from 'googleapis';
 import { WorkDir } from '../config/config.js';
-import { createRun, createMessage } from '../runs/runs.js';
-import { getKgModel } from '../models/defaults.js';
-import { getErrorDetails, waitForRunCompletion } from '../agents/utils.js';
+import { runWhenPossible } from '../runtime/assembly/headless-app.js';
+import { asRunModelOptions, getKgModel } from '../models/defaults.js';
+import { getErrorDetails } from '../application/lib/errors.js';
 import { serviceLogger } from '../services/service_logger.js';
 import { loadUserConfig, updateUserEmail } from '../config/user_config.js';
 import { GoogleClientFactory } from './google-client-factory.js';
+import { gmailRateLimitCooldownMs } from './gmail-rate-limit.js';
 import {
     loadAgentNotesState,
     saveAgentNotesState,
@@ -191,17 +191,29 @@ function extractConversationMessages(runFilePath: string): { role: string; text:
 
 // --- User email resolution ---
 
+// The processing loop ticks every 10s; until the profile fetch succeeds once
+// (it persists into user config and is never needed again) each tick would
+// re-hit Gmail — during a rate-limit lockout that both burned quota and kept
+// re-arming the cooldown. Attempt at most every 15 minutes, never during a
+// lockout.
+let lastProfileAttemptAt = 0;
+const PROFILE_RETRY_MS = 15 * 60_000;
+
 async function ensureUserEmail(): Promise<string | null> {
     const existing = loadUserConfig();
     if (existing?.email) {
         return existing.email;
     }
 
+    if (gmailRateLimitCooldownMs() > 0) return null;
+    if (Date.now() - lastProfileAttemptAt < PROFILE_RETRY_MS) return null;
+    lastProfileAttemptAt = Date.now();
+
     // Try direct Google OAuth (covers both BYOK and rowboat modes)
     try {
         const auth = await GoogleClientFactory.getClient();
         if (auth) {
-            const gmail = google.gmail({ version: 'v1', auth });
+            const gmail = GoogleClientFactory.gmailClient(auth);
             const profile = await gmail.users.getProfile({ userId: 'me' });
             if (profile.data.emailAddress) {
                 updateUserEmail(profile.data.emailAddress);
@@ -281,14 +293,14 @@ async function processAgentNotes(): Promise<void> {
         const timestamp = new Date().toISOString();
         const message = `Current timestamp: ${timestamp}\n\nProcess the following source material and update the Agent Notes folder accordingly.\n\n${messageParts.join('\n\n')}`;
 
-        const agentRun = await createRun({
+        await runWhenPossible({
             agentId: AGENT_ID,
-            model: await getKgModel(),
+            message,
             useCase: 'knowledge_sync',
             subUseCase: 'agent_notes',
+            ...asRunModelOptions(await getKgModel()),
+            throwOnError: true,
         });
-        await createMessage(agentRun.id, message);
-        await waitForRunCompletion(agentRun.id, { throwOnError: true });
 
         // Mark everything as processed
         for (const p of emailPaths) {

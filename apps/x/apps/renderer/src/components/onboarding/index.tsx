@@ -14,15 +14,25 @@ import { StepIndicator } from "./step-indicator"
 import { WelcomeStep } from "./steps/welcome-step"
 import { LlmSetupStep } from "./steps/llm-setup-step"
 import { ConnectAccountsStep } from "./steps/connect-accounts-step"
+import { CodeModeStep } from "./steps/code-mode-step"
 import { CompletionStep } from "./steps/completion-step"
 
 interface OnboardingModalProps {
   open: boolean
-  onComplete: () => void
+  onComplete: (opts?: { startTour?: boolean }) => void
 }
 
 export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
   const state = useOnboardingState(open, onComplete)
+  const [panelHeight, setPanelHeight] = React.useState<number>()
+  const measureReference = React.useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
+    const measure = () => setPanelHeight(Math.ceil(node.getBoundingClientRect().height))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   const stepContent = React.useMemo(() => {
     switch (state.currentStep) {
@@ -33,6 +43,8 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       case 2:
         return <ConnectAccountsStep state={state} />
       case 3:
+        return <CodeModeStep state={state} />
+      case 4:
         return <CompletionStep state={state} />
     }
   }, [state.currentStep, state])
@@ -54,15 +66,28 @@ export function OnboardingModal({ open, onComplete }: OnboardingModalProps) {
       <Dialog open={open} onOpenChange={() => {}}>
         <DialogContent
           className="w-[90vw] max-w-2xl max-h-[85vh] p-0 overflow-hidden"
+          style={panelHeight ? { height: `min(${panelHeight}px, 85dvh)` } : undefined}
           showCloseButton={false}
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
-          <div className="flex flex-col h-full max-h-[85vh] overflow-y-auto p-8 md:p-10">
-            <StepIndicator
-              currentStep={state.currentStep}
-              path={state.onboardingPath}
-            />
+          {/* Measure the unchanged Connect page at this panel's width, so every
+              step matches it even when text wraps or the viewport changes. */}
+          <div
+            ref={measureReference}
+            aria-hidden="true"
+            inert
+            className="invisible pointer-events-none absolute inset-x-0 top-0 flex flex-col p-8 md:p-10"
+          >
+            <StepIndicator currentStep={2} />
+            <ConnectAccountsStep state={{
+              ...state,
+              providersLoading: false,
+              providers: state.providersLoading ? ['google', 'microsoft'] : state.providers,
+            }} />
+          </div>
+          <div className="flex min-h-0 flex-col h-full max-h-[85vh] overflow-y-auto p-8 md:p-10">
+            <StepIndicator currentStep={state.currentStep} />
             <AnimatePresence mode="wait">
               <motion.div
                 key={state.currentStep}

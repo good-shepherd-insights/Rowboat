@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Streamdown } from 'streamdown'
 import '@/styles/live-note-panel.css'
+import * as analytics from '@/lib/analytics'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
+import { ModelSelector, modelOverrideToRef, refToModelOverride } from '@/components/model-selector'
 import {
   Play, Square, Loader2, Sparkles,
   AlertCircle, Plus, X, Check, Pencil, Radio, Repeat, Clock, Zap,
   ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { LiveNoteSchema, type LiveNote, type Triggers } from '@x/shared/dist/live-note.js'
-import type { Run } from '@x/shared/dist/runs.js'
-import type z from 'zod'
 import { useLiveNoteAgentStatus } from '@/hooks/use-live-note-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
-import { runLogToConversation } from '@/lib/run-to-conversation'
-import { CompactConversation } from '@/components/compact-conversation'
+import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
+import { TurnConversation } from '@/components/turn-conversation'
 
 export type OpenLiveNotePanelDetail = {
   filePath: string
@@ -168,6 +168,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Save failed')
         return
       }
+      analytics.liveNoteSaved()
       setLive(res.live ?? null)
       setDraft(res.live ? structuredClone(res.live) as LiveNote : null)
       setEditingObjective(false)
@@ -197,6 +198,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Failed')
         return
       }
+      analytics.liveNoteToggled(live.active === false)
       setLive(res.live ?? null)
       setDraft(res.live ? structuredClone(res.live) as LiveNote : null)
     } catch (err) {
@@ -209,6 +211,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
   const handleRun = useCallback(async () => {
     if (!knowledgeRelPath) return
     setError(null)
+    analytics.liveNoteRunClicked()
     try {
       await window.ipc.invoke('live-note:run', { filePath: knowledgeRelPath })
     } catch (err) {
@@ -221,6 +224,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
     setError(null)
     try {
       const res = await window.ipc.invoke('live-note:stop', { filePath: knowledgeRelPath })
+      if (res.success) analytics.liveNoteStopped()
       if (!res.success && res.error) setError(res.error)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -237,6 +241,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
         setError(res.error ?? 'Delete failed')
         return
       }
+      analytics.liveNoteDeleted()
       setLive(null)
       setDraft(null)
       setConfirmingDelete(false)
@@ -249,6 +254,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
 
   const handleEditWithCopilot = useCallback(() => {
     if (!filePath) return
+    analytics.liveNoteEditWithCopilotClicked()
     window.dispatchEvent(new CustomEvent('rowboat:open-copilot-edit-live-note', {
       detail: { filePath },
     }))
@@ -266,7 +272,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
   if (!loading && !live) {
     return (
       <aside className="flex w-[440px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-border bg-background">
-        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+        <div className="rowboat-header flex shrink-0 items-center gap-2.5 border-b border-border px-4">
           <Radio className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate text-sm font-semibold">{noteTitle}</span>
           <span className="ml-auto" />
@@ -302,17 +308,17 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
   return (
     <aside className="flex w-[440px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-border bg-background">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+      <div className="rowboat-header flex shrink-0 items-center gap-2.5 border-b border-border px-4">
         <Radio
-          className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-emerald-600 dark:text-emerald-400'}`}
+          className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--rowboat-success)]'}`}
         />
         <span className="truncate text-sm font-semibold">{noteTitle}</span>
         <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
           paused
             ? 'bg-muted text-muted-foreground'
-            : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+            : 'bg-[var(--rowboat-success)]/10 text-[var(--rowboat-success)]'
         }`}>
-          <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-emerald-500'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
+          <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-[var(--rowboat-success)]'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
           {paused ? 'Paused' : 'Live note'}
         </span>
         <span className="ml-auto" />
@@ -350,7 +356,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
           <div className="shrink-0 border-b border-border px-4 py-3">
             <div className="grid grid-cols-2 gap-4">
               <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Last run</div>
+                <div className="text-[13px] text-muted-foreground">Last run</div>
                 <div className="mt-0.5 truncate text-xs text-foreground">
                   {live.lastRunAt
                     ? <>
@@ -361,7 +367,7 @@ export function LiveNoteSidebar({ filePath, onClose }: LiveNoteSidebarProps) {
                 </div>
               </div>
               <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Triggers</div>
+                <div className="text-[13px] text-muted-foreground">Triggers</div>
                 <div className="mt-0.5 truncate text-xs text-foreground">{summarizeSchedule(live.triggers)}</div>
               </div>
             </div>
@@ -591,7 +597,7 @@ function DetailsTab({
         <button
           type="button"
           onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex w-full items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          className="flex w-full items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground"
           aria-expanded={showAdvanced}
         >
           {showAdvanced ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
@@ -600,19 +606,14 @@ function DetailsTab({
         {showAdvanced && (
           <div className="mt-3">
             <div className="grid grid-cols-[74px_1fr] gap-x-3 gap-y-2.5 text-xs">
-              <span className="pt-1.5 text-muted-foreground">Model</span>
-              <Input
-                value={draft.model ?? ''}
-                onChange={(e) => setDraft({ ...draft, model: e.target.value || undefined })}
-                placeholder="(global default)"
-                className="h-7 font-mono text-xs"
-              />
-              <span className="pt-1.5 text-muted-foreground">Provider</span>
-              <Input
-                value={draft.provider ?? ''}
-                onChange={(e) => setDraft({ ...draft, provider: e.target.value || undefined })}
-                placeholder="(global default)"
-                className="h-7 font-mono text-xs"
+              <span className="pt-2 text-muted-foreground">Model</span>
+              <ModelSelector
+                variant="field"
+                inheritDefault={{ label: '(global default)' }}
+                allowCustom
+                effortSelectable
+                value={modelOverrideToRef(draft.model, draft.provider, draft.effort)}
+                onChange={(selection) => setDraft({ ...draft, ...refToModelOverride(selection) })}
               />
             </div>
             <div className="mt-4">
@@ -651,7 +652,7 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
   return (
     <div className="border-b border-border px-4 py-4 last:border-b-0">
       {label && (
-        <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="mb-3 text-[13px] text-muted-foreground">
           {label}
         </div>
       )}
@@ -661,37 +662,14 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
 }
 
 function LastRunTab({ live }: { live: LiveNote }) {
-  const [run, setRun] = useState<z.infer<typeof Run> | null>(null)
-  const [loadingRun, setLoadingRun] = useState(false)
-  const [fetchError, setFetchError] = useState<string | null>(null)
-
   const runId = live.lastRunId ?? null
-
-  useEffect(() => {
-    if (!runId) {
-      setRun(null)
-      setFetchError(null)
-      setLoadingRun(false)
-      return
-    }
-    let cancelled = false
-    setLoadingRun(true)
-    setFetchError(null)
-    void (async () => {
-      try {
-        const r = await window.ipc.invoke('runs:fetch', { runId })
-        if (cancelled) return
-        setRun(r)
-      } catch (err) {
-        if (cancelled) return
-        setFetchError(err instanceof Error ? err.message : String(err))
-        setRun(null)
-      } finally {
-        if (!cancelled) setLoadingRun(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [runId])
+  // Live via the turns:events spine: an in-flight run's transcript streams
+  // in as the agent works; settled runs render from one snapshot fetch.
+  const {
+    transcript,
+    loading: loadingRun,
+    error: fetchError,
+  } = useAgentRunTranscript(runId)
 
   if (!runId) {
     return (
@@ -704,7 +682,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
   }
 
   const isError = !!live.lastRunError
-  const items = run ? runLogToConversation(run.log) : []
+  const items = transcript?.items ?? []
 
   return (
     <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
@@ -738,7 +716,7 @@ function LastRunTab({ live }: { live: LiveNote }) {
 
       {/* Full transcript */}
       <div>
-        <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="mb-2 text-[13px] text-muted-foreground">
           Transcript
         </div>
         {loadingRun && (
@@ -751,11 +729,11 @@ function LastRunTab({ live }: { live: LiveNote }) {
             Couldn't load transcript: {fetchError}
           </div>
         )}
-        {run && !loadingRun && items.length === 0 && (
+        {transcript && !loadingRun && items.length === 0 && (
           <p className="text-xs italic text-muted-foreground">No messages or tool calls recorded.</p>
         )}
-        {run && !loadingRun && items.length > 0 && (
-          <CompactConversation items={items} />
+        {transcript && !loadingRun && items.length > 0 && (
+          <TurnConversation items={items} />
         )}
       </div>
     </div>

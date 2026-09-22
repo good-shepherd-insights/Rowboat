@@ -1,8 +1,13 @@
-import { ArrowUpRight, ChevronDown, MessageSquare, Plus } from 'lucide-react'
+import { useCallback } from 'react'
+import { ArrowUpRight, Bug, ChevronDown, MessageSquare, MoreHorizontal, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { TokenUsageMenu } from '@/components/token-usage-menu'
+import type { TokenUsage } from '@/lib/chat-conversation'
+import { hasTokenUsage } from '@/lib/token-usage'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +29,7 @@ export interface ChatHeaderProps {
   onNewChatTab: () => void
   recentRuns?: ChatHeaderRecentRun[]
   activeRunId?: string | null
+  sessionUsage?: TokenUsage
   onSelectRun?: (runId: string) => void
   onOpenChatHistory?: () => void
 }
@@ -40,10 +46,37 @@ export function ChatHeader({
   onNewChatTab,
   recentRuns = [],
   activeRunId,
+  sessionUsage,
   onSelectRun,
   onOpenChatHistory,
 }: ChatHeaderProps) {
   const hasHistory = recentRuns.length > 0 || Boolean(onOpenChatHistory)
+  const showUsage = hasTokenUsage(sessionUsage)
+
+  const handleDownloadChatLog = useCallback(async () => {
+    if (!activeRunId) {
+      toast.error('No chat log available yet')
+      return
+    }
+    try {
+      // Session-first (new runtime); legacy runs fallback covers old
+      // background tabs until stage 7 removes the runs runtime.
+      let result: { success: boolean; error?: string }
+      try {
+        result = await window.ipc.invoke('sessions:downloadLog', { sessionId: activeRunId })
+      } catch {
+        result = await window.ipc.invoke('runs:downloadLog', { runId: activeRunId })
+      }
+      if (result.success) {
+        toast.success('Chat log saved')
+      } else if (result.error) {
+        toast.error(result.error)
+      }
+    } catch (err) {
+      console.error('Download chat log failed:', err)
+      toast.error('Failed to download chat log')
+    }
+  }, [activeRunId])
 
   return (
     <>
@@ -52,7 +85,7 @@ export function ChatHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground outline-none hover:bg-accent/60"
+              className="titlebar-no-drag flex min-w-0 flex-1 self-stretch items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground outline-none hover:bg-accent/60"
               aria-label="Chat history"
             >
               <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
@@ -60,9 +93,9 @@ export function ChatHeader({
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-72">
+          <DropdownMenuContent align="start" className="max-h-96 w-72 overflow-y-auto">
             {recentRuns.length > 0 && (
-              <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <DropdownMenuLabel className="text-[13px] font-normal text-muted-foreground">
                 Recent
               </DropdownMenuLabel>
             )}
@@ -90,10 +123,18 @@ export function ChatHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-2 px-3 text-sm font-medium text-foreground">
+        <div className="flex min-w-0 flex-1 self-stretch items-center gap-2 px-3 text-sm font-medium text-foreground">
           <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{activeTitle}</span>
         </div>
+      )}
+      {showUsage && (
+        <TokenUsageMenu
+          usage={sessionUsage}
+          scope="session"
+          className="titlebar-no-drag my-1 shrink-0"
+          align="end"
+        />
       )}
       <Tooltip>
         <TooltipTrigger asChild>
@@ -109,6 +150,34 @@ export function ChatHeader({
         </TooltipTrigger>
         <TooltipContent side="bottom">New chat</TooltipContent>
       </Tooltip>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="titlebar-no-drag my-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                aria-label="Chat options"
+              >
+                <MoreHorizontal className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Chat options</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="min-w-48">
+          <DropdownMenuItem
+            disabled={!activeRunId}
+            onSelect={() => {
+              void handleDownloadChatLog()
+            }}
+          >
+            <Bug className="size-4" />
+            Download chat log
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   )
 }

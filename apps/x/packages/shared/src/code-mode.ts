@@ -13,6 +13,16 @@ export type CodingAgent = z.infer<typeof CodingAgent>;
 export const ApprovalPolicy = z.enum(["ask", "auto-approve-reads", "yolo"]);
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicy>;
 
+// Project Harness controls, independent of the Assistant's own model.
+export const HarnessSettings = z.object({
+    enabled: z.boolean(),
+    agent: CodingAgent,
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    policy: ApprovalPolicy.optional(),
+});
+export type HarnessSettings = z.infer<typeof HarnessSettings>;
+
 export const PermissionDecision = z.enum(["allow_once", "allow_always", "reject"]);
 export type PermissionDecision = z.infer<typeof PermissionDecision>;
 
@@ -54,6 +64,11 @@ export const CodeRunEvent = z.discriminatedUnion("type", [
         })),
     }),
     z.object({
+        type: z.literal("usage"),
+        used: z.number().nonnegative(),
+        size: z.number().positive(),
+    }),
+    z.object({
         type: z.literal("permission"),
         ask: PermissionAsk,
         decision: z.union([PermissionDecision, z.literal("cancelled")]),
@@ -68,3 +83,11 @@ export const RunPromptResult = z.object({
     sessionId: z.string(),
 });
 export type RunPromptResult = z.infer<typeof RunPromptResult>;
+
+// One item on the ephemeral CodeRunFeed (`codeRun:events` broadcast): a live
+// code-run event tagged with the tool call it belongs to. Fire-and-forget —
+// the durable record is the code-run-events-batch written when the run settles.
+export type CodeRunFeedEvent = {
+    toolCallId: string;
+    event: CodeRunEvent;
+};

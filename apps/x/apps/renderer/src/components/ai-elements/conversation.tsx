@@ -1,6 +1,10 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import {
+  ChatScrollController,
+  type ChatScrollMode,
+} from "@/lib/chat-scroll";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps, ReactNode, RefObject } from "react";
@@ -15,9 +19,6 @@ import {
   useState,
 } from "react";
 
-const BOTTOM_THRESHOLD_PX = 8;
-const MAX_ANCHOR_RETRIES = 6;
-
 interface ConversationContextValue {
   contentRef: RefObject<HTMLDivElement | null>;
   isAtBottom: boolean;
@@ -28,14 +29,27 @@ interface ConversationContextValue {
 const ConversationContext = createContext<ConversationContextValue | null>(null);
 
 export type ConversationProps = ComponentProps<"div"> & {
+  /** 'chat' anchors sends at the viewport top (ChatGPT); 'code' jumps sends
+   * to the live edge and follows the run (Codex). See lib/chat-scroll.ts. */
+  scrollMode?: ChatScrollMode;
+  /** Chat identity for cross-remount reading-position memory. */
+  scrollMemoryKey?: string;
   anchorMessageId?: string | null;
   anchorRequestKey?: number;
+  /** Deep link: pin this item's row near the viewport top once it renders
+   * (lib/chat-scroll.ts requestJump). Each new jumpRequestKey re-applies. */
+  jumpMessageId?: string | null;
+  jumpRequestKey?: number;
   children?: ReactNode;
 };
 
 export const Conversation = ({
+  scrollMode = "chat",
+  scrollMemoryKey,
   anchorMessageId = null,
   anchorRequestKey,
+  jumpMessageId = null,
+  jumpRequestKey,
   children,
   className,
   ...props
@@ -43,152 +57,92 @@ export const Conversation = ({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement | null>(null);
-  const [isAtBottom, setIsAtBottom] = useState(true);
-
-  const updateBottomState = useCallback(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    setIsAtBottom(distanceFromBottom <= BOTTOM_THRESHOLD_PX);
-  }, []);
-
-  const applyAnchorLayout = useCallback(
-    (scrollToAnchor: boolean): boolean => {
-      const container = scrollRef.current;
-      const content = contentRef.current;
-      const spacer = spacerRef.current;
-
-      if (!container || !content || !spacer) {
-        return false;
-      }
-
-      if (!anchorMessageId) {
-        spacer.style.height = "0px";
-        updateBottomState();
-        return true;
-      }
-
-      const anchor = content.querySelector<HTMLElement>(
-        `[data-message-id="${anchorMessageId}"]`
-      );
-
-      if (!anchor) {
-        spacer.style.height = "0px";
-        updateBottomState();
-        return false;
-      }
-
-      spacer.style.height = "0px";
-
-      const contentPaddingTop = Number.parseFloat(
-        window.getComputedStyle(content).paddingTop || "0"
-      );
-      const anchorTop = anchor.offsetTop;
-      const targetScrollTop = Math.max(0, anchorTop - contentPaddingTop);
-      const requiredSlack = Math.max(
-        0,
-        targetScrollTop - (content.scrollHeight - container.clientHeight)
-      );
-
-      spacer.style.height = `${Math.ceil(requiredSlack)}px`;
-
-      if (scrollToAnchor) {
-        container.scrollTop = targetScrollTop;
-      }
-
-      updateBottomState();
-      return true;
-    },
-    [anchorMessageId, updateBottomState]
+  // One controller per mounted conversation (the pane remounts per chat
+  // identity, so mount lifetime == conversation binding lifetime).
+  const [controller] = useState(
+    () =>
+      new ChatScrollController({ mode: scrollMode, memoryKey: scrollMemoryKey })
   );
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [isFollowing, setIsFollowing] = useState(true);
 
   useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-
-    const handleScroll = () => {
-      updateBottomState();
-    };
-
-    handleScroll();
-    container.addEventListener("scroll", handleScroll, { passive: true });
-
-    return () => {
-      container.removeEventListener("scroll", handleScroll);
-    };
-  }, [updateBottomState]);
+    controller.setMode(scrollMode);
+  }, [controller, scrollMode]);
 
   useLayoutEffect(() => {
     const container = scrollRef.current;
     const content = contentRef.current;
-    if (!container || !content) return;
+    const spacer = spacerRef.current;
+    if (!container || !content || !spacer) return;
 
-    let rafId: number | null = null;
-
-    const schedule = () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
-      rafId = requestAnimationFrame(() => {
-        applyAnchorLayout(false);
-      });
-    };
-
-    const observer = new ResizeObserver(schedule);
-    observer.observe(container);
-    observer.observe(content);
-    schedule();
+    controller.attach({ container, content, spacer });
+    const unsubscribe = controller.subscribe((snapshot) => {
+      setIsAtBottom(snapshot.nearBottom);
+      setIsFollowing(snapshot.following);
+    });
 
     return () => {
-      observer.disconnect();
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
+      unsubscribe();
+      controller.detach();
     };
-  }, [applyAnchorLayout]);
+  }, [controller]);
 
+  // A send bumps anchorRequestKey. Chat mode pins the new user message at the
+  // viewport top; code mode (or an anchorless bump, e.g. new-chat reset)
+  // returns to the live edge. The mount-time key is deliberately ignored:
+  // remounts restore the remembered reading position instead of re-applying
+  // a stale anchor.
+  const appliedRequestKeyRef = useRef(anchorRequestKey);
   useLayoutEffect(() => {
-    if (anchorRequestKey === undefined) return;
+    if (
+      anchorRequestKey === undefined ||
+      anchorRequestKey === appliedRequestKeyRef.current
+    ) {
+      return;
+    }
+    appliedRequestKeyRef.current = anchorRequestKey;
 
-    let attempts = 0;
-    let rafId: number | null = null;
+    if (scrollMode === "code" || !anchorMessageId) {
+      controller.jumpToLatest("instant");
+      return;
+    }
 
-    const tryAnchor = () => {
-      if (applyAnchorLayout(true)) {
-        return;
-      }
-      if (attempts >= MAX_ANCHOR_RETRIES) {
-        return;
-      }
-      attempts += 1;
-      rafId = requestAnimationFrame(tryAnchor);
-    };
+    // The message row usually renders AFTER this bump (the active pane is
+    // store-backed — the row lands with the send's round-trip, under the
+    // store's own id). The controller keeps the request pending and applies
+    // it exactly once when the row appears.
+    controller.requestSendAnchor(anchorMessageId);
+  }, [anchorRequestKey, anchorMessageId, scrollMode, controller]);
 
-    tryAnchor();
-
-    return () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
-    };
-  }, [anchorRequestKey, applyAnchorLayout]);
+  // A deep link (Spaces' "Open agent chat" on a reply, landing on the run
+  // that wrote it). Unlike the send anchor, a mount-time request IS applied:
+  // the pane usually mounts because of the jump, and the controller keeps it
+  // pending until the transcript renders the row.
+  const appliedJumpKeyRef = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (jumpRequestKey === undefined || jumpRequestKey === appliedJumpKeyRef.current) {
+      return;
+    }
+    appliedJumpKeyRef.current = jumpRequestKey;
+    if (jumpMessageId) controller.requestJump(jumpMessageId);
+  }, [jumpRequestKey, jumpMessageId, controller]);
 
   const scrollToBottom = useCallback(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    container.scrollTop = container.scrollHeight;
-    updateBottomState();
-  }, [updateBottomState]);
+    controller.jumpToLatest("smooth");
+  }, [controller]);
 
   const contextValue = useMemo<ConversationContextValue>(
     () => ({
       contentRef,
-      isAtBottom,
+      // The jump button targets readers who left the live edge: hidden while
+      // near the bottom AND while following (following keeps the view pinned
+      // even when growth momentarily outruns the near-bottom band).
+      isAtBottom: isAtBottom || isFollowing,
       scrollRef,
       scrollToBottom,
     }),
-    [isAtBottom, scrollToBottom]
+    [isAtBottom, isFollowing, scrollToBottom]
   );
 
   return (
@@ -274,8 +228,6 @@ export const ConversationEmptyState = ({
   </div>
 );
 
-export const ScrollPositionPreserver = () => null;
-
 export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
 
 export const ConversationScrollButton = ({
@@ -292,7 +244,9 @@ export const ConversationScrollButton = ({
     !isAtBottom && (
       <Button
         className={cn(
-          "absolute bottom-6 left-[50%] z-10 h-12 w-12 translate-x-[-50%] rounded-full border border-border/70 bg-background/95 text-foreground shadow-lg backdrop-blur-sm transition hover:bg-background",
+          // Floating circle: raised surface, hairline ring folded into
+          // the shadow, 36px.
+          "absolute bottom-6 left-[50%] z-10 h-9 w-9 translate-x-[-50%] rounded-full border-none bg-[var(--rowboat-raised)] text-[var(--rowboat-ink-secondary)] shadow-[var(--rowboat-shadow-soft)] transition hover:bg-[var(--rowboat-raised)] hover:text-foreground",
           className
         )}
         aria-label="Scroll to latest message"
@@ -301,7 +255,7 @@ export const ConversationScrollButton = ({
         variant="ghost"
         {...props}
       >
-        <ArrowDownIcon className="size-6" strokeWidth={1.75} />
+        <ArrowDownIcon className="size-4.5" strokeWidth={1.5} />
       </Button>
     )
   );

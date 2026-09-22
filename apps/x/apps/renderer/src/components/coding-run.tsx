@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
+  AlertCircle,
   CheckCircle2,
   Circle,
   CircleDot,
@@ -9,14 +10,19 @@ import {
   Pencil,
   Search,
   ShieldQuestion,
+  Sparkles,
   Terminal,
   Trash2,
   Wrench,
 } from 'lucide-react'
 import type { CodeRunEvent, PermissionAsk, PermissionDecision } from '@x/shared/src/code-mode.js'
 import { cn } from '@/lib/utils'
+import { MessageResponse } from '@/components/ai-elements/message'
+import { streamdownComponents } from '@/lib/markdown-render'
 import { Tool, ToolContent, ToolHeader } from '@/components/ai-elements/tool'
-import { toToolState, type ToolCall } from '@/lib/chat-conversation'
+import { getToolErrorText, toToolState, type ToolCall } from '@/lib/chat-conversation'
+import { clearCodeRunBuffer, useCodeRunFeed } from '@/lib/code-run-feed'
+import { useCodeDiffOpener } from '@/contexts/code-diff-context'
 
 // ── Timeline reduction ──────────────────────────────────────────────
 // The raw ACP stream is a flat list of events; collapse it into ordered rows,
@@ -28,7 +34,7 @@ type PlanRow = { kind: 'plan'; id: string; entries: { content: string; status?: 
 type PermRow = { kind: 'perm'; id: string; title: string; decision: string }
 type Row = TextRow | ToolRow | PlanRow | PermRow
 
-function reduceEvents(events: CodeRunEvent[]): Row[] {
+export function reduceEvents(events: CodeRunEvent[]): Row[] {
   const rows: Row[] = []
   const toolIdx = new Map<string, number>()
   let planIdx = -1
@@ -87,7 +93,8 @@ function reduceEvents(events: CodeRunEvent[]): Row[] {
   return rows
 }
 
-function toolKindIcon(kind?: string) {
+function toolKindIcon(kind?: string, title?: string) {
+  if (title === 'Compacting context') return <Sparkles className="size-3.5 shrink-0 text-muted-foreground" />
   switch (kind) {
     case 'read': return <Eye className="size-3.5 shrink-0 text-muted-foreground" />
     case 'edit': return <Pencil className="size-3.5 shrink-0 text-muted-foreground" />
@@ -100,45 +107,83 @@ function toolKindIcon(kind?: string) {
 }
 
 function planMarker(status?: string) {
-  if (status === 'completed') return <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />
-  if (status === 'in_progress') return <CircleDot className="size-3.5 shrink-0 text-blue-500" />
+  if (status === 'completed') return <CheckCircle2 className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
+  if (status === 'in_progress') return <CircleDot className="size-3.5 shrink-0 text-[var(--rowboat-git)]" />
   return <Circle className="size-3.5 shrink-0 text-muted-foreground" />
 }
 
 const basename = (p: string) => p.split(/[\\/]/).pop() || p
 
-function CodingRunTimeline({ events }: { events: CodeRunEvent[] }) {
+export function CodingRunTimeline({
+  events,
+  error,
+  onOpenDiff,
+}: {
+  events: CodeRunEvent[]
+  error?: string
+  // When set, changed-file names become clickable (the Code section opens the diff).
+  onOpenDiff?: (path: string) => void
+}) {
   const rows = useMemo(() => reduceEvents(events), [events])
   if (rows.length === 0) {
-    return <div className="px-4 py-3 text-xs text-muted-foreground">Starting the agent…</div>
+    if (error) {
+      return (
+        <div className="py-1">
+          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0 whitespace-pre-wrap break-words">{error}</span>
+          </div>
+        </div>
+      )
+    }
+    return <div className="py-1 text-xs text-muted-foreground">Starting the agent…</div>
   }
   return (
-    <div className="flex flex-col gap-2 px-4 py-3">
+    <div className="flex flex-col gap-2 py-1">
       {rows.map((row) => {
         if (row.kind === 'text') {
+          // Streamdown handles partial markdown, so this renders cleanly both
+          // while the agent streams and for the durable settled timeline.
           return (
-            <p key={row.id} className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
-              {row.text}
-            </p>
+            <div key={row.id} className="min-w-0 break-words text-sm leading-relaxed text-foreground/90">
+              <MessageResponse components={streamdownComponents}>{row.text}</MessageResponse>
+            </div>
           )
         }
         if (row.kind === 'tool') {
           const running = row.status !== 'completed' && row.status !== 'failed'
+          const failed = row.status === 'failed'
           return (
             <div key={row.id} className="flex flex-col gap-1">
               <div className="flex items-center gap-2 text-sm">
-                {running
-                  ? <Loader className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                  : <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />}
-                {toolKindIcon(row.toolKind)}
+                {running ? (
+                  <Loader className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                ) : failed ? (
+                  <AlertCircle className="size-3.5 shrink-0 text-destructive" />
+                ) : (
+                  <CheckCircle2 className="size-3.5 shrink-0 text-[var(--rowboat-success)]" />
+                )}
+                {toolKindIcon(row.toolKind, row.title)}
                 <span className="truncate text-foreground/90">{row.title ?? row.toolKind ?? 'Tool call'}</span>
               </div>
               {row.diffs.length > 0 && (
                 <div className="ml-7 flex flex-col gap-0.5">
                   {row.diffs.map((d) => (
-                    <span key={d} className="truncate font-mono text-xs text-muted-foreground" title={d}>
-                      {basename(d)}
-                    </span>
+                    onOpenDiff ? (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => onOpenDiff(d)}
+                        className="truncate text-left font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+                        title={d}
+                      >
+                        {basename(d)}
+                      </button>
+                    ) : (
+                      <span key={d} className="truncate font-mono text-xs text-muted-foreground" title={d}>
+                        {basename(d)}
+                      </span>
+                    )
                   ))}
                 </div>
               )}
@@ -162,12 +207,18 @@ function CodingRunTimeline({ events }: { events: CodeRunEvent[] }) {
         // resolved permission
         const denied = row.decision === 'reject' || row.decision === 'cancelled'
         return (
-          <div key={row.id} className={cn('flex items-center gap-2 text-xs', denied ? 'text-red-600' : 'text-green-600')}>
+          <div key={row.id} className={cn('flex items-center gap-2 text-xs', denied ? 'text-red-600' : 'text-[var(--rowboat-success)]')}>
             {denied ? '✕' : '✓'}
             <span className="truncate">{denied ? 'Denied' : 'Allowed'}: {row.title}</span>
           </div>
         )
       })}
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          <span className="min-w-0 whitespace-pre-wrap break-words">{error}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -187,17 +238,14 @@ export function CodeRunPermissionRequest({
     setBusy(true)
     onDecide(d)
   }
-  const btn = 'rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50'
+  const btn = 'rounded-full px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50'
   return (
-    <div className="mb-4 rounded-[20px] border border-amber-500/40 bg-amber-500/5 p-4">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <ShieldQuestion className="size-4 shrink-0 text-amber-600" />
-        Permission needed
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        The agent wants to: <span className="font-medium text-foreground">{ask.title}</span>
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
+    <div className="my-1 flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-[10px] border border-l-2 border-l-amber-500/70 px-3 py-2 text-[13px]">
+      <ShieldQuestion className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+      <span className="min-w-0 flex-1 truncate" title={ask.title}>
+        Allow <span className="font-medium">{ask.title}</span>?
+      </span>
+      <div className="ml-auto flex shrink-0 flex-wrap gap-1.5">
         <button type="button" disabled={busy} onClick={() => decide('allow_once')}
           className={cn(btn, 'bg-foreground text-background hover:bg-foreground/90')}>
           Allow
@@ -237,12 +285,32 @@ export function CodingRunBlock({
     (item.result as { agent?: string } | undefined)?.agent ??
     (item.input as { agent?: string } | undefined)?.agent
   const title = AGENT_LABEL[agent ?? ''] ?? 'Coding agent'
+  const task = (item.input as { task?: string; prompt?: string } | undefined)
+  const taskText = (task?.task ?? task?.prompt ?? '').trim()
+  const error = getToolErrorText(item)
+  // Timeline source: the durable record (item.codeRunEvents — the settle-time
+  // batch, or the legacy path's inline accumulation) wins; while it's absent
+  // the live CodeRunFeed buffer streams the run in real time.
+  const liveEvents = useCodeRunFeed(item.id)
+  // Changed-file names open the Code drawer's diff when the chat is bound to
+  // a code session; elsewhere they stay plain text.
+  const openDiff = useCodeDiffOpener()
+  const durableEvents = item.codeRunEvents
+  const events = durableEvents?.length ? durableEvents : liveEvents
+  // Once the durable batch has landed the buffer is redundant — drop it.
+  useEffect(() => {
+    if (durableEvents?.length) clearCodeRunBuffer(item.id)
+  }, [durableEvents?.length, item.id])
   return (
     <>
       <Tool open={open} onOpenChange={onOpenChange}>
-        <ToolHeader title={title} type="tool-code_agent_run" state={toToolState(item.status)} />
+        <ToolHeader
+          summary={{ verb: title, detail: taskText || undefined }}
+          type="tool-code_agent_run"
+          state={toToolState(item.status)}
+        />
         <ToolContent>
-          <CodingRunTimeline events={item.codeRunEvents ?? []} />
+          <CodingRunTimeline events={events} error={error} onOpenDiff={openDiff ?? undefined} />
         </ToolContent>
       </Tool>
       {item.pendingCodePermission && (

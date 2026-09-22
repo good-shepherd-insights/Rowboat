@@ -1,8 +1,7 @@
 import type { EventConsumer, EventConsumerTarget } from '../events/consumer.js';
 import { routeBatch } from '../events/routing.js';
-import { createProvider } from '../models/models.js';
+import { createLanguageModel } from '../models/models.js';
 import {
-    getDefaultModelAndProvider,
     getBackgroundTaskAgentModel,
     resolveProviderConfig,
 } from '../models/defaults.js';
@@ -10,11 +9,12 @@ import { listTasks } from './fileops.js';
 import { runBackgroundTask } from './runner.js';
 
 async function resolveRoutingModel() {
-    const modelId = await getBackgroundTaskAgentModel();
-    const { provider } = await getDefaultModelAndProvider();
+    // Deliberately effort-free: the routing pass is a cheap yes/no
+    // classifier; the backgroundTask effort applies to the agent RUNS it triggers.
+    const { model: modelId, provider } = await getBackgroundTaskAgentModel();
     const config = await resolveProviderConfig(provider);
     return {
-        model: createProvider(config).languageModel(modelId),
+        model: createLanguageModel(config, modelId),
         modelId,
         providerName: provider,
     };

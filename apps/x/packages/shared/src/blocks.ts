@@ -47,10 +47,17 @@ export const ChartBlockSchema = z.object({
   data: z.array(z.record(z.string(), z.unknown())).optional(),
   source: z.string().optional(),
   x: z.string(),
-  y: z.string(),
+  // One series (string) or several (array of data keys). Pie ignores all
+  // but the first.
+  y: z.union([z.string(), z.array(z.string()).min(1)]),
 });
 
 export type ChartBlock = z.infer<typeof ChartBlockSchema>;
+
+/** The y series list regardless of which form the block used. */
+export function chartSeries(block: ChartBlock): string[] {
+  return Array.isArray(block.y) ? block.y : [block.y];
+}
 
 export const TableBlockSchema = z.object({
   columns: z.array(z.string()),
@@ -107,6 +114,10 @@ export const GmailAttachmentSchema = z.object({
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
   savedPath: z.string(),
+  // Gmail identifiers used to fetch the attachment on demand when it hasn't
+  // been downloaded to disk yet (e.g. attachments on search results).
+  messageId: z.string().optional(),
+  attachmentId: z.string().optional(),
 });
 
 export type GmailAttachment = z.infer<typeof GmailAttachmentSchema>;
@@ -124,6 +135,14 @@ export const GmailThreadMessageSchema = z.object({
   bodyHeight: z.number().int().positive().optional(),
   attachments: z.array(GmailAttachmentSchema).optional(),
   messageIdHeader: z.string().optional(),
+  // Set on the unsent draft message within a thread (used by the Drafts view).
+  isDraft: z.boolean().optional(),
+  // The draft's own stored In-Reply-To / References headers. Only set on
+  // draft messages: a Drafts-view pseudo-thread contains just the draft, so
+  // the composer can't rebuild the reply chain from thread messages and must
+  // reuse what the draft already carries.
+  inReplyToHeader: z.string().optional(),
+  referencesHeader: z.string().optional(),
 });
 
 export type GmailThreadMessage = z.infer<typeof GmailThreadMessageSchema>;
@@ -133,11 +152,30 @@ export const GmailThreadSchema = EmailBlockSchema.extend({
   threadUrl: z.string().url(),
   unread: z.boolean().optional(),
   importance: z.enum(['important', 'other']).optional(),
+  // What kind of email this is (correspondence, meeting, notification,
+  // newsletter, promotion, cold_outreach, receipt). Loose string so the
+  // classifier's taxonomy can evolve without a lockstep schema change.
+  category: z.string().optional(),
   gmail_draft: z.string().optional(),
+  // Gmail-side draft id, present on entries returned by the Drafts list so the
+  // composer can update/delete that exact draft.
+  draftId: z.string().optional(),
+  // Provider-supplied plain-text preview of the latest message (Gmail
+  // `snippet` / Graph `bodyPreview`) — clean list-row text, unlike
+  // latest_email which is markdown and can lead with table scaffolding.
+  preview: z.string().optional(),
   messages: z.array(GmailThreadMessageSchema),
 });
 
 export type GmailThread = z.infer<typeof GmailThreadSchema>;
+
+// Provider-neutral aliases: the same thread shape is served for Gmail and
+// Outlook (the sync backends normalize into it). New code should use these;
+// the Gmail-prefixed names above are kept for the existing renderer surface.
+export const EmailThreadSchema = GmailThreadSchema;
+export type EmailThread = GmailThread;
+export const EmailThreadMessageSchema = GmailThreadMessageSchema;
+export type EmailThreadMessage = GmailThreadMessage;
 
 export const EmailsBlockSchema = z.object({
   title: z.string().optional(),

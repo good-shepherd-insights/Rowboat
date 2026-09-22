@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { UseCase } from '@x/shared/dist/analytics.js';
 
-export type UseCase = 'copilot_chat' | 'live_note_agent' | 'background_task_agent' | 'meeting_note' | 'knowledge_sync';
+export type { UseCase } from '@x/shared/dist/analytics.js';
 
 export interface UseCaseContext {
   useCase: UseCase;

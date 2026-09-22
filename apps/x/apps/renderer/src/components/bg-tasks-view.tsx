@@ -4,21 +4,48 @@ import {
     ListChecks, Play, Square, Loader2, Trash2, Plus, X, AlertCircle,
     Repeat, Clock, Zap, ChevronLeft, ChevronDown, ChevronRight,
     Pencil, Check, PanelRightClose, PanelRightOpen, Sparkles,
+    Code2, FolderOpen, LayoutTemplate, MoreVertical,
 } from 'lucide-react'
-import type { z } from 'zod'
 import type { BackgroundTask, BackgroundTaskSummary, Triggers } from '@x/shared/dist/background-task.js'
-import type { Run } from '@x/shared/dist/runs.js'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { BgTaskMenuItems } from '@/components/bg-task-menu-items'
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog'
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useBackgroundTaskAgentStatus } from '@/hooks/use-bg-task-agent-status'
 import { formatRelativeTime } from '@/lib/relative-time'
 import { toast } from '@/lib/toast'
+import * as analytics from '@/lib/analytics'
 import type { ConversationItem } from '@/lib/chat-conversation'
-import { runLogToConversation } from '@/lib/run-to-conversation'
-import { CompactConversation } from '@/components/compact-conversation'
+import { fetchAgentRunTranscript } from '@/lib/agent-transcript'
+import { useAgentRunTranscript } from '@/hooks/use-agent-run-transcript'
+import { TurnConversation } from '@/components/turn-conversation'
+import { ModelSelector, modelOverrideToRef, refToModelOverride } from '@/components/model-selector'
 import { RichMarkdownViewer } from '@/components/rich-markdown-viewer'
+import { HtmlFileViewer } from '@/components/html-file-viewer'
 
 // ---------------------------------------------------------------------------
 // Trigger helpers (inlined; extract to shared <TriggersEditor> as a follow-up)
@@ -270,7 +297,16 @@ function TriggersEditor({
 // New Task dialog
 // ---------------------------------------------------------------------------
 
-type DialogMode = 'describe' | 'manual'
+type DialogMode = 'describe' | 'manual' | 'templates' | 'coding'
+
+// Prefills for the "Coding from meetings" preset.
+const CODING_PRESET = {
+    name: 'Implement coding items from meetings',
+    instructions: `After a meeting's notes are ready, scan them for coding action items (bugs to fix, features to build, concrete changes requested) for me or my team.
+
+Conservatively implement the clearly-scoped, self-contained ones in the configured repo using the launch-code-task tool — group related items into one session, split unrelated ones. Note ambiguous, large/architectural, or other-repo items as "needs review" instead of coding them. If nothing is actionable, do nothing.`,
+    eventMatchCriteria: `A meeting's notes or transcript just became available (engineering standup, planning, sprint, or technical discussion) that may contain coding action items, bugs to fix, or features to build.`,
+}
 
 function NewTaskDialog({
     open,
@@ -294,6 +330,9 @@ function NewTaskDialog({
     const [name, setName] = useState('')
     const [instructions, setInstructions] = useState('')
     const [triggers, setTriggers] = useState<Triggers | undefined>(undefined)
+    const [projectId, setProjectId] = useState<string | undefined>(undefined)
+    const [projectName, setProjectName] = useState<string | undefined>(undefined)
+    const [addingProject, setAddingProject] = useState(false)
     const [submitting, setSubmitting] = useState(false)
 
     useEffect(() => {
@@ -303,14 +342,69 @@ function NewTaskDialog({
             setName('')
             setInstructions('')
             setTriggers(undefined)
+            setProjectId(undefined)
+            setProjectName(undefined)
         }
     }, [open, copilotEnabled])
 
+    // Switch into the coding preset: prefill name/instructions/trigger once.
+    const enterCodingMode = () => {
+        setMode('coding')
+        setName(CODING_PRESET.name)
+        setInstructions(CODING_PRESET.instructions)
+        setTriggers({ eventMatchCriteria: CODING_PRESET.eventMatchCriteria })
+    }
+
+    const pickRepo = async () => {
+        setAddingProject(true)
+        try {
+            const res = await window.ipc.invoke('dialog:openDirectory', { title: 'Choose the repository for this task' })
+            const dir = res.path
+            if (!dir) return
+            const added = await window.ipc.invoke('codeProject:add', { path: dir })
+            if (!added.git?.isGitRepo) {
+                toast('That folder is not a git repository — coding tasks need one.', 'error')
+                return
+            }
+            setProjectId(added.project.id)
+            setProjectName(added.project.name)
+        } catch (err) {
+            toast(err instanceof Error ? err.message : String(err), 'error')
+        } finally {
+            setAddingProject(false)
+        }
+    }
+
     const canSubmitDescribe = description.trim().length > 0 && !submitting
     const canSubmitManual = name.trim().length > 0 && instructions.trim().length > 0 && !submitting
+    const canSubmitCoding = name.trim().length > 0 && instructions.trim().length > 0 && !!projectId && !submitting
+
+    const submitCoding = async () => {
+        if (!canSubmitCoding) return
+        setSubmitting(true)
+        try {
+            const result = await window.ipc.invoke('bg-task:create', {
+                name: name.trim(),
+                instructions: instructions.trim(),
+                ...(triggers ? { triggers } : {}),
+                ...(projectId ? { projectId } : {}),
+            })
+            if (result.success && result.slug) {
+                analytics.bgAgentCreated({ method: 'coding', hasTriggers: Boolean(triggers) })
+                onCreated(result.slug)
+            } else {
+                toast(result.error ?? 'Failed to create task', 'error')
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : String(err), 'error')
+        } finally {
+            setSubmitting(false)
+        }
+    }
 
     const submitDescribe = () => {
         if (!canSubmitDescribe || !onCreateWithCopilot) return
+        analytics.bgAgentCreated({ method: 'copilot', hasTriggers: false })
         onCreateWithCopilot(description.trim())
         onClose()
     }
@@ -325,6 +419,7 @@ function NewTaskDialog({
                 ...(triggers ? { triggers } : {}),
             })
             if (result.success && result.slug) {
+                analytics.bgAgentCreated({ method: 'manual', hasTriggers: Boolean(triggers) })
                 onCreated(result.slug)
             } else {
                 toast(result.error ?? 'Failed to create task', 'error')
@@ -358,7 +453,116 @@ function NewTaskDialog({
                     </button>
                 </div>
 
-                {mode === 'describe' ? (
+                {(mode === 'describe' || mode === 'manual') && (
+                    <button
+                        type="button"
+                        onClick={() => setMode('templates')}
+                        className="mb-4 flex w-full items-center justify-between gap-2 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-left text-[12px] hover:border-solid hover:bg-accent"
+                    >
+                        <span className="flex items-center gap-2">
+                            <LayoutTemplate className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="font-medium">View available templates</span>
+                        </span>
+                        <ChevronRight className="size-4 text-muted-foreground" />
+                    </button>
+                )}
+
+                {mode === 'templates' ? (
+                    <>
+                        <div className="space-y-2">
+                            {[
+                                {
+                                    id: 'coding-from-meetings',
+                                    title: 'Coding from meetings',
+                                    description: "When a meeting's notes are ready, scan them for coding action items and auto-implement them in a repo — each on its own isolated branch, with a summary.",
+                                    icon: Code2,
+                                    onSelect: enterCodingMode,
+                                },
+                            ].map(preset => (
+                                <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={preset.onSelect}
+                                    className="flex w-full items-start gap-2.5 rounded-md border bg-muted/40 px-3 py-2.5 text-left hover:border-foreground/30 hover:bg-accent"
+                                >
+                                    <preset.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                                    <span className="min-w-0">
+                                        <span className="block text-[12.5px] font-medium">{preset.title}</span>
+                                        <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{preset.description}</span>
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-between gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMode(copilotEnabled ? 'describe' : 'manual')}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                ← Back
+                            </button>
+                            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+                        </div>
+                    </>
+                ) : mode === 'coding' ? (
+                    <>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Repository</label>
+                                {projectName ? (
+                                    <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
+                                        <span className="flex items-center gap-2 text-[13px]">
+                                            <FolderOpen className="size-4 text-muted-foreground" />
+                                            <span className="font-medium">{projectName}</span>
+                                        </span>
+                                        <button type="button" onClick={pickRepo} className="text-[11px] text-muted-foreground hover:text-foreground" disabled={addingProject}>Change</button>
+                                    </div>
+                                ) : (
+                                    <Button variant="outline" size="sm" onClick={pickRepo} disabled={addingProject}>
+                                        {addingProject ? <Loader2 className="mr-1 size-3 animate-spin" /> : <FolderOpen className="mr-1 size-3" />}
+                                        Choose a git repository…
+                                    </Button>
+                                )}
+                                <p className="mt-1 text-[11px] text-muted-foreground">
+                                    Code changes run full-auto in an isolated git worktree — your working checkout is never touched.
+                                </p>
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Name</label>
+                                <Input value={name} onChange={e => setName(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Instructions</label>
+                                <Textarea value={instructions} onChange={e => setInstructions(e.target.value)} rows={6} className="text-[12.5px] leading-relaxed" />
+                            </div>
+                            <div>
+                                <label className="mb-2 block text-[13px] text-muted-foreground">Triggers</label>
+                                <TriggersEditor value={triggers} onChange={setTriggers} />
+                                <p className="mt-2 text-[11px] text-muted-foreground">
+                                    Prefilled to fire when a meeting's notes become available. Adjust if you want.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-between gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMode(copilotEnabled ? 'describe' : 'manual')}
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                                ← Back
+                            </button>
+                            <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={onClose} disabled={submitting}>Cancel</Button>
+                                <Button size="sm" onClick={submitCoding} disabled={!canSubmitCoding}>
+                                    {submitting && <Loader2 className="mr-1 size-3 animate-spin" />}
+                                    Create
+                                </Button>
+                            </div>
+                        </div>
+                    </>
+                ) : mode === 'describe' ? (
                     <>
                         <Textarea
                             value={description}
@@ -400,7 +604,7 @@ Example: every morning at 7, summarize my unread Gmail into a one-paragraph brie
                     <>
                         <div className="space-y-4">
                             <div>
-                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Name</label>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Name</label>
                                 <Input
                                     value={name}
                                     onChange={e => setName(e.target.value)}
@@ -409,7 +613,7 @@ Example: every morning at 7, summarize my unread Gmail into a one-paragraph brie
                                 />
                             </div>
                             <div>
-                                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Instructions</label>
+                                <label className="mb-1 block text-[13px] text-muted-foreground">Instructions</label>
                                 <Textarea
                                     value={instructions}
                                     onChange={e => setInstructions(e.target.value)}
@@ -422,7 +626,7 @@ Example: every morning at 7, summarize my unread Gmail into a one-paragraph brie
                                 </p>
                             </div>
                             <div>
-                                <label className="mb-2 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Triggers</label>
+                                <label className="mb-2 block text-[13px] text-muted-foreground">Triggers</label>
                                 <TriggersEditor value={triggers} onChange={setTriggers} />
                                 <p className="mt-2 text-[11px] text-muted-foreground">
                                     No triggers = manual-only.
@@ -490,9 +694,9 @@ function TabButton({
 
 function SectionRegion({ label, children }: { label?: string; children: React.ReactNode }) {
     return (
-        <div className="border-b border-sidebar-border px-4 py-4 last:border-b-0">
+        <div className="border-b border-border px-4 py-4 last:border-b-0">
             {label && (
-                <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="mb-3 text-[13px] text-muted-foreground">
                     {label}
                 </div>
             )}
@@ -502,15 +706,22 @@ function SectionRegion({ label, children }: { label?: string; children: React.Re
 }
 
 // ---------------------------------------------------------------------------
-// Output pane — index.md (main pane content)
+// Output pane — index.html (preferred) or index.md (main pane content)
 //
-// Renders the task's `index.md` like a note: max-width 720px centered, same
-// typography (~16px, 1.5 line-height, generous padding) as the note editor's
-// ProseMirror rule in `editor.css`. No chrome above the body — just the
-// markdown, with a small floating Source ⇄ Rendered toggle in the top-right.
+// A task's agent-owned artifact is either:
+//   - `index.html` — a self-contained, styled web page. Rendered full-bleed in
+//     a sandboxed iframe (via `HtmlFileViewer` / the `app://workspace`
+//     protocol) so CSS, layout, and scripts render faithfully. Preferred when
+//     present and non-empty.
+//   - `index.md`   — a note. Rendered like the note editor: max-width 720px
+//     centered, same typography as `editor.css`, via `RichMarkdownViewer`.
+//
+// In both cases a small floating Source ⇄ Rendered toggle in the top-right
+// swaps the rendered view for the raw file source.
 // ---------------------------------------------------------------------------
 
 function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: string; refreshKey: number }) {
+    const [mode, setMode] = useState<'md' | 'html'>('md')
     const [body, setBody] = useState<string>('')
     const [loading, setLoading] = useState(true)
     const [viewSource, setViewSource] = useState(false)
@@ -519,21 +730,33 @@ function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: st
         let cancelled = false
         setLoading(true)
         void (async () => {
+            // Prefer index.html when it exists and has content; otherwise fall
+            // back to index.md (the default seeded artifact).
             try {
-                const result = await window.ipc.invoke('workspace:readFile', {
+                const html = await window.ipc.invoke('workspace:readFile', {
+                    path: `bg-tasks/${slug}/index.html`,
+                })
+                if (html.data.trim()) {
+                    if (!cancelled) { setMode('html'); setBody(html.data) }
+                    return
+                }
+            } catch {
+                // No index.html — fall through to markdown.
+            }
+            try {
+                const md = await window.ipc.invoke('workspace:readFile', {
                     path: `bg-tasks/${slug}/index.md`,
                 })
-                if (!cancelled) setBody(result.data)
+                if (!cancelled) { setMode('md'); setBody(md.data) }
             } catch {
-                if (!cancelled) setBody('')
-            } finally {
-                if (!cancelled) setLoading(false)
+                if (!cancelled) { setMode('md'); setBody('') }
             }
-        })()
+        })().finally(() => { if (!cancelled) setLoading(false) })
         return () => { cancelled = true }
     }, [slug, refreshKey])
 
-    const isEmpty = !body.trim() || body.trim() === `# ${taskName}`
+    const isEmpty = mode === 'md' && (!body.trim() || body.trim() === `# ${taskName}`)
+    const showHtml = mode === 'html' && !viewSource
 
     return (
         <div className="relative flex-1 overflow-hidden bg-background">
@@ -542,29 +765,35 @@ function OutputPane({ slug, taskName, refreshKey }: { slug: string; taskName: st
                     type="button"
                     onClick={() => setViewSource(v => !v)}
                     className="absolute right-4 top-3 z-10 rounded-md bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground backdrop-blur hover:bg-accent hover:text-foreground"
-                    aria-label={viewSource ? 'Show rendered output' : 'Show source markdown'}
+                    aria-label={viewSource ? 'Show rendered output' : 'Show source'}
                 >
                     {viewSource ? 'Rendered' : 'Source'}
                 </button>
             )}
 
-            <div className="h-full overflow-y-auto">
-                <div className="mx-auto max-w-[720px] px-16 py-8">
-                    {loading ? (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Loader2 className="size-3 animate-spin" /> Loading…
-                        </div>
-                    ) : isEmpty ? (
-                        <p className="text-sm italic text-muted-foreground">
-                            No output yet. Click <span className="font-medium text-foreground">Run now</span> in the sidebar, or wait for a trigger to fire.
-                        </p>
-                    ) : viewSource ? (
-                        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed">{body}</pre>
-                    ) : (
-                        <RichMarkdownViewer content={body} />
-                    )}
+            {showHtml ? (
+                // Full-bleed: the iframe fills the pane and scrolls internally.
+                // Remount on refreshKey so a re-run's updated index.html reloads.
+                <HtmlFileViewer key={`${slug}-${refreshKey}`} path={`bg-tasks/${slug}/index.html`} />
+            ) : (
+                <div className="h-full overflow-y-auto">
+                    <div className="mx-auto max-w-[720px] px-16 py-8">
+                        {loading ? (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Loader2 className="size-3 animate-spin" /> Loading…
+                            </div>
+                        ) : isEmpty ? (
+                            <p className="text-sm italic text-muted-foreground">
+                                No output yet. Click <span className="font-medium text-foreground">Run now</span> in the sidebar, or wait for a trigger to fire.
+                            </p>
+                        ) : viewSource ? (
+                            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-relaxed">{body}</pre>
+                        ) : (
+                            <RichMarkdownViewer content={body} />
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     )
 }
@@ -636,7 +865,7 @@ function InstructionsBlock({
     return (
         <div>
             <div className="mb-2 flex items-center justify-between">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Instructions</div>
+                <div className="text-[13px] text-muted-foreground">Instructions</div>
                 <button
                     type="button"
                     onClick={() => setEditing(true)}
@@ -707,11 +936,11 @@ function SetupTab({
                 />
             </SectionRegion>
 
-            <div className="border-b border-sidebar-border px-4 py-3">
+            <div className="border-b border-border px-4 py-3">
                 <button
                     type="button"
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="flex w-full items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    className="flex w-full items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground"
                     aria-expanded={showAdvanced}
                 >
                     {showAdvanced ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
@@ -720,19 +949,14 @@ function SetupTab({
                 {showAdvanced && (
                     <div className="mt-3">
                         <div className="grid grid-cols-[74px_1fr] gap-x-3 gap-y-2.5 text-xs">
-                            <span className="pt-1.5 text-muted-foreground">Model</span>
-                            <Input
-                                value={draft.model ?? ''}
-                                onChange={e => setDraft({ ...draft, model: e.target.value || undefined })}
-                                placeholder="(global default)"
-                                className="h-7 font-mono text-xs"
-                            />
-                            <span className="pt-1.5 text-muted-foreground">Provider</span>
-                            <Input
-                                value={draft.provider ?? ''}
-                                onChange={e => setDraft({ ...draft, provider: e.target.value || undefined })}
-                                placeholder="(global default)"
-                                className="h-7 font-mono text-xs"
+                            <span className="pt-2 text-muted-foreground">Model</span>
+                            <ModelSelector
+                                variant="field"
+                                inheritDefault={{ label: '(global default)' }}
+                                allowCustom
+                                effortSelectable
+                                value={modelOverrideToRef(draft.model, draft.provider, draft.effort)}
+                                onChange={(selection) => setDraft({ ...draft, ...refToModelOverride(selection) })}
                             />
                         </div>
                         <div className="mt-4">
@@ -769,10 +993,9 @@ function SetupTab({
 // Runs history tab — list + drill-down transcript view
 //
 // Source of truth: `bg-tasks/<slug>/runs.log` — a plain-text file with one
-// runId per line (newest first). The actual transcripts live at the global
-// `$WorkDir/runs/<runId>.jsonl`, so this tab fetches runIds via the bg-task
-// IPC, then loads each Run through the standard `runs:fetch`. No bg-task-
-// specific transcript path or schema needed.
+// turn id per line (newest first). Transcripts live in the turn runtime's
+// storage; this tab fetches ids via the bg-task IPC, then loads each through
+// the shared agent-transcript loader (turn-first, legacy-run fallback).
 // ---------------------------------------------------------------------------
 
 interface RunRowSummary {
@@ -783,27 +1006,6 @@ interface RunRowSummary {
     error?: string
 }
 
-// Pull the bits we want to display for a row out of a full Run's event log.
-function summarizeRun(run: z.infer<typeof Run>): RunRowSummary {
-    const out: RunRowSummary = { runId: run.id, createdAt: run.createdAt, trigger: run.subUseCase }
-    for (const event of run.log) {
-        if (event.type === 'error' && typeof event.error === 'string') {
-            out.error = event.error
-        } else if (event.type === 'message' && event.message?.role === 'assistant') {
-            const content = event.message.content
-            if (typeof content === 'string') {
-                out.summary = content
-            } else if (Array.isArray(content)) {
-                const text = content
-                    .filter((p) => p.type === 'text')
-                    .map((p) => ('text' in p ? p.text : ''))
-                    .join('')
-                if (text) out.summary = text
-            }
-        }
-    }
-    return out
-}
 
 function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) {
     const [rows, setRows] = useState<RunRowSummary[]>([])
@@ -815,19 +1017,25 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
         setLoading(true)
         try {
             const { runIds } = await window.ipc.invoke('bg-task:listRunIds', { slug, limit: 100 })
-            // Fetch each Run in parallel via the canonical IPC. Runs whose
-            // jsonl no longer exists (deleted manually, never written, …) are
-            // dropped silently.
+            // Fetch transcripts in parallel (turn-first, legacy-run
+            // fallback). Ids whose files no longer exist keep a bare row so
+            // the user knows the run happened.
             const settled = await Promise.allSettled(
-                runIds.map(runId => window.ipc.invoke('runs:fetch', { runId }))
+                runIds.map(runId => fetchAgentRunTranscript(runId))
             )
             const next: RunRowSummary[] = []
             for (let i = 0; i < settled.length; i++) {
                 const r = settled[i]
-                if (r.status === 'fulfilled' && r.value) {
-                    next.push(summarizeRun(r.value))
+                if (r.status === 'fulfilled') {
+                    const t = r.value
+                    next.push({
+                        runId: t.id,
+                        ...(t.createdAt === undefined ? {} : { createdAt: t.createdAt }),
+                        ...(t.trigger === undefined ? {} : { trigger: t.trigger }),
+                        ...(t.summary === undefined ? {} : { summary: t.summary }),
+                        ...(t.error === undefined ? {} : { error: t.error }),
+                    })
                 } else {
-                    // Keep the row visible with just the id so the user knows it exists.
                     next.push({ runId: runIds[i] })
                 }
             }
@@ -877,7 +1085,7 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
                     </p>
                 </div>
             ) : (
-                <div className="divide-y divide-sidebar-border">
+                <div className="divide-y divide-border">
                     {rows.map(row => {
                         const inFlight = row.runId === currentInFlightRunId
                         const isError = !!row.error
@@ -891,7 +1099,7 @@ function RunsHistoryTab({ slug, task }: { slug: string; task: BackgroundTask }) 
                                 <div className={`size-1.5 shrink-0 rounded-full ${
                                     inFlight ? 'bg-amber-500 animate-pulse'
                                         : isError ? 'bg-destructive'
-                                            : 'bg-emerald-500'
+                                            : 'bg-[var(--rowboat-success)]'
                                 }`} />
                                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                                     <div className="flex items-center gap-2 text-xs">
@@ -933,38 +1141,16 @@ function RunTranscriptView({
     isInFlight: boolean
     onBack: () => void
 }) {
-    const [run, setRun] = useState<z.infer<typeof Run> | null>(null)
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState<string | null>(null)
+    // Live via the turns:events spine: an in-flight run's transcript streams
+    // in as the agent works; settled runs render from one snapshot fetch.
+    const { transcript, loading, error } = useAgentRunTranscript(runId)
 
-    useEffect(() => {
-        let cancelled = false
-        setLoading(true)
-        setError(null)
-        void (async () => {
-            try {
-                // Bg-task transcripts now live at the global runs/ location —
-                // same path resolution as every other run, no special handling.
-                const r = await window.ipc.invoke('runs:fetch', { runId })
-                if (cancelled) return
-                setRun(r)
-            } catch (err) {
-                if (cancelled) return
-                setError(err instanceof Error ? err.message : String(err))
-                setRun(null)
-            } finally {
-                if (!cancelled) setLoading(false)
-            }
-        })()
-        return () => { cancelled = true }
-    }, [runId])
-
-    const summary = run ? summarizeRun(run) : undefined
-    const items: ConversationItem[] = run ? runLogToConversation(run.log) : []
+    const summary = transcript ?? undefined
+    const items: ConversationItem[] = transcript?.items ?? []
 
     return (
         <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center gap-2 border-b border-sidebar-border px-3 py-2">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
                 <button
                     type="button"
                     onClick={onBack}
@@ -1003,11 +1189,11 @@ function RunTranscriptView({
                     )}
                 </div>
 
-                <div className="border-t border-sidebar-border" />
+                <div className="border-t border-border" />
 
                 {/* Transcript */}
                 <div>
-                    <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    <div className="mb-2 text-[13px] text-muted-foreground">
                         Transcript
                     </div>
                     {loading && (
@@ -1020,11 +1206,11 @@ function RunTranscriptView({
                             Couldn&apos;t load transcript: {error}
                         </div>
                     )}
-                    {run && !loading && items.length === 0 && (
+                    {transcript && !loading && items.length === 0 && (
                         <p className="text-xs italic text-muted-foreground">No messages or tool calls recorded.</p>
                     )}
-                    {run && !loading && items.length > 0 && (
-                        <CompactConversation items={items} />
+                    {transcript && !loading && items.length > 0 && (
+                        <TurnConversation items={items} />
                     )}
                 </div>
             </div>
@@ -1095,19 +1281,19 @@ function ControlSidebar({
             : 'Never'
 
     return (
-        <aside className="flex w-[400px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-sidebar-border bg-sidebar text-sidebar-foreground">
+        <aside className="flex w-[400px] max-w-[40vw] shrink-0 flex-col overflow-hidden border-l border-border bg-background">
             {/* Header */}
-            <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4">
+            <div className="rowboat-header flex shrink-0 items-center gap-2.5 border-b border-border px-4">
                 <ListChecks
-                    className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-emerald-600 dark:text-emerald-400'}`}
+                    className={`size-4 shrink-0 ${paused ? 'text-muted-foreground' : 'text-[var(--rowboat-success)]'}`}
                 />
                 <span className="truncate text-sm font-semibold">{task.name}</span>
                 <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                     paused
                         ? 'bg-muted text-muted-foreground'
-                        : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-[var(--rowboat-success)]/10 text-[var(--rowboat-success)]'
                 }`}>
-                    <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-emerald-500'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
+                    <span className={`size-1.5 rounded-full ${paused ? 'bg-muted-foreground/60' : 'bg-[var(--rowboat-success)]'} ${isRunning ? 'animate-pulse' : ''}`} aria-hidden />
                     {paused ? 'Paused' : 'Active'}
                 </span>
                 <span className="ml-auto" />
@@ -1129,10 +1315,10 @@ function ControlSidebar({
             </div>
 
             {/* Status strip */}
-            <div className="shrink-0 border-b border-sidebar-border px-4 py-3">
+            <div className="shrink-0 border-b border-border px-4 py-3">
                 <div className="grid grid-cols-2 gap-4">
                     <div className="min-w-0">
-                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Last run</div>
+                        <div className="text-[13px] text-muted-foreground">Last run</div>
                         <div className="mt-0.5 truncate text-xs text-foreground">
                             {task.lastRunAt || task.lastAttemptAt ? (
                                 <>
@@ -1145,14 +1331,14 @@ function ControlSidebar({
                         </div>
                     </div>
                     <div className="min-w-0">
-                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Schedule</div>
+                        <div className="text-[13px] text-muted-foreground">Schedule</div>
                         <div className="mt-0.5 truncate text-xs text-foreground">{summarizeSchedule(task.triggers)}</div>
                     </div>
                 </div>
             </div>
 
             {/* Tabs */}
-            <div className="flex shrink-0 border-b border-sidebar-border px-4">
+            <div className="flex shrink-0 border-b border-border px-4">
                 <TabButton active={tab === 'setup'} onClick={() => setTab('setup')}>Setup</TabButton>
                 <TabButton active={tab === 'runs'} onClick={() => setTab('runs')}>Runs history</TabButton>
             </div>
@@ -1179,10 +1365,10 @@ function ControlSidebar({
             )}
 
             {/* Footer — Edit with Copilot · Save (when dirty) · Run / Stop. */}
-            <div className="flex shrink-0 items-center gap-2 border-t border-sidebar-border bg-sidebar-accent/20 px-4 py-2.5">
+            <div className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-2.5">
                 {isRunning ? (
                     <>
-                        <span className="inline-flex items-center gap-1.5 text-xs text-sidebar-foreground">
+                        <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
                             <Loader2 className="size-3 animate-spin" /> Running
                         </span>
                         <span className="ml-auto" />
@@ -1303,8 +1489,10 @@ function TaskDetail({
             if (JSON.stringify(draft.triggers) !== JSON.stringify(task.triggers)) partial.triggers = draft.triggers
             if (draft.model !== task.model) partial.model = draft.model
             if (draft.provider !== task.provider) partial.provider = draft.provider
+            if (draft.effort !== task.effort) partial.effort = draft.effort
             const result = await window.ipc.invoke('bg-task:patch', { slug, partial })
             if (result.success && result.task) {
+                analytics.bgAgentUpdated()
                 setTask(result.task)
                 setDraft(result.task)
                 setEditingInstructions(false)
@@ -1326,12 +1514,14 @@ function TaskDetail({
         if (!task) return
         const result = await window.ipc.invoke('bg-task:patch', { slug, partial: { active } })
         if (result.success && result.task) {
+            analytics.bgAgentToggled(active)
             setTask(result.task)
             setDraft(result.task)
         }
     }
 
     const runNow = async () => {
+        analytics.bgAgentRunClicked()
         const result = await window.ipc.invoke('bg-task:run', { slug })
         if (!result.success) {
             toast(result.error ?? 'Run failed', 'error')
@@ -1339,12 +1529,14 @@ function TaskDetail({
     }
 
     const stopRun = async () => {
+        analytics.bgAgentStopped()
         await window.ipc.invoke('bg-task:stop', { slug })
     }
 
     const deleteTask = async () => {
         const result = await window.ipc.invoke('bg-task:delete', { slug })
         if (result.success) {
+            analytics.bgAgentDeleted()
             onDeleted()
         } else {
             toast(result.error ?? 'Delete failed', 'error')
@@ -1362,7 +1554,7 @@ function TaskDetail({
     return (
         <div className="flex h-full flex-col overflow-hidden">
             {/* Top bar — back to list, sidebar toggle when collapsed */}
-            <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+            <div className="rowboat-header flex shrink-0 items-center gap-2 border-b border-border px-3">
                 <button
                     type="button"
                     onClick={onBack}
@@ -1421,6 +1613,91 @@ function TaskDetail({
 }
 
 // ---------------------------------------------------------------------------
+// Task details dialog — opened from a list row's ⋯ menu
+// ---------------------------------------------------------------------------
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+        <div className="grid grid-cols-[100px_1fr] items-start gap-x-3">
+            <div className="pt-0.5 text-[13px] text-muted-foreground">{label}</div>
+            <div className="min-w-0 text-xs leading-relaxed text-foreground">{children}</div>
+        </div>
+    )
+}
+
+function TaskDetailsDialog({ summary, onClose }: { summary: BackgroundTaskSummary | null; onClose: () => void }) {
+    // `model` / `provider` live only on the full task, not the list summary —
+    // fetch them when the dialog opens.
+    const [full, setFull] = useState<BackgroundTask | null>(null)
+    const slug = summary?.slug
+
+    useEffect(() => {
+        setFull(null)
+        if (!slug) return
+        let cancelled = false
+        window.ipc.invoke('bg-task:get', { slug })
+            .then(result => {
+                if (!cancelled && result.success && result.task) setFull(result.task)
+            })
+            .catch(() => {})
+        return () => { cancelled = true }
+    }, [slug])
+
+    if (!summary) return null
+
+    return (
+        <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+            <DialogContent className="max-w-lg">
+                <DialogHeader>
+                    <DialogTitle className="truncate pr-6">{summary.name}</DialogTitle>
+                    <DialogDescription className="font-mono text-[11px]">{summary.slug}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <DetailRow label="Description">
+                        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap">{summary.instructions}</div>
+                    </DetailRow>
+                    <DetailRow label="Status">{summary.active ? 'Active' : 'Paused'}</DetailRow>
+                    <DetailRow label="Schedule">{summarizeSchedule(summary.triggers)}</DetailRow>
+                    <DetailRow label="Model">
+                        {full
+                            ? <span className={full.model ? 'font-mono' : 'text-muted-foreground'}>{full.model ?? 'Global default'}</span>
+                            : <span className="text-muted-foreground">…</span>}
+                    </DetailRow>
+                    <DetailRow label="Provider">
+                        {full
+                            ? <span className={full.provider ? 'font-mono' : 'text-muted-foreground'}>{full.provider ?? 'Global default'}</span>
+                            : <span className="text-muted-foreground">…</span>}
+                    </DetailRow>
+                    {summary.projectId && (
+                        <DetailRow label="Type">Coding task — pinned to a registered repo</DetailRow>
+                    )}
+                    {summary.sourceApp && (
+                        <DetailRow label="Installed by">
+                            <span className="font-mono">{summary.sourceApp}</span> (app)
+                        </DetailRow>
+                    )}
+                    <DetailRow label="Created">{formatRunAt(summary.createdAt)}</DetailRow>
+                    <DetailRow label="Last run">
+                        {summary.lastRunAt ? (
+                            <div className="space-y-1">
+                                <div>{formatRunAt(summary.lastRunAt)}{relativeLabel(summary.lastRunAt) && ` (${relativeLabel(summary.lastRunAt)})`}</div>
+                                {summary.lastRunError ? (
+                                    <div className="line-clamp-3 text-destructive">{summary.lastRunError}</div>
+                                ) : summary.lastRunSummary ? (
+                                    <div className="line-clamp-3 text-muted-foreground">{summary.lastRunSummary}</div>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <span className="text-muted-foreground">Never</span>
+                        )}
+                    </DetailRow>
+                </div>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+// ---------------------------------------------------------------------------
 // List view
 // ---------------------------------------------------------------------------
 
@@ -1459,7 +1736,12 @@ function formatLastRanLabel(iso: string | null | undefined): string {
 export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlug, slugVersion }: BgTasksViewProps = {}) {
     const [items, setItems] = useState<BackgroundTaskSummary[]>([])
     const [selectedSlug, setSelectedSlug] = useState<string | null>(initialSlug ?? null)
+    // Version-guarded: the view is kept alive in an <Activity> while hidden
+    // and effects re-run on every re-show — apply only on real version bumps.
+    const appliedSlugVersionRef = useRef<number | null>(null)
     useEffect(() => {
+      if (appliedSlugVersionRef.current === (slugVersion ?? 0)) return
+      appliedSlugVersionRef.current = slugVersion ?? 0
       setSelectedSlug(initialSlug ?? null)
     }, [initialSlug, slugVersion])
     const [loading, setLoading] = useState(true)
@@ -1469,6 +1751,11 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
     // as `LiveNotesView` uses for its toggle / stop buttons.
     const [updatingSlugs, setUpdatingSlugs] = useState<Set<string>>(new Set())
     const [stoppingSlugs, setStoppingSlugs] = useState<Set<string>>(new Set())
+    const [startingSlugs, setStartingSlugs] = useState<Set<string>>(new Set())
+    const startingSlugsRef = useRef(new Set<string>())
+    const [detailsTask, setDetailsTask] = useState<BackgroundTaskSummary | null>(null)
+    const [deleteTarget, setDeleteTarget] = useState<BackgroundTaskSummary | null>(null)
+    const [deleting, setDeleting] = useState(false)
     const agentStatus = useBackgroundTaskAgentStatus()
 
     const load = useCallback(async () => {
@@ -1503,6 +1790,7 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                 toast(result.error ?? 'Failed to update task', 'error')
                 return
             }
+            analytics.bgAgentToggled(active)
             // Optimistically reflect the new state without re-fetching the whole list.
             setItems(prev => prev.map(t => t.slug === slug ? { ...t, active } : t))
         } catch (err) {
@@ -1515,6 +1803,22 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
             })
         }
     }, [])
+
+    const handleRunNow = useCallback(async (slug: string) => {
+        if (startingSlugsRef.current.has(slug) || agentStatus.get(slug)?.status === 'running') return
+        startingSlugsRef.current.add(slug)
+        setStartingSlugs(new Set(startingSlugsRef.current))
+        try {
+            analytics.bgAgentRunClicked()
+            const result = await window.ipc.invoke('bg-task:run', { slug })
+            if (!result.success) toast(result.error ?? 'Run failed', 'error')
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Run failed', 'error')
+        } finally {
+            startingSlugsRef.current.delete(slug)
+            setStartingSlugs(new Set(startingSlugsRef.current))
+        }
+    }, [agentStatus])
 
     const handleStop = useCallback(async (slug: string) => {
         setStoppingSlugs(prev => new Set(prev).add(slug))
@@ -1534,6 +1838,25 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
         }
     }, [])
 
+    const handleDelete = useCallback(async () => {
+        if (!deleteTarget) return
+        setDeleting(true)
+        try {
+            const result = await window.ipc.invoke('bg-task:delete', { slug: deleteTarget.slug })
+            if (result.success) {
+                analytics.bgAgentDeleted()
+                setDeleteTarget(null)
+                void load()
+            } else {
+                toast(result.error ?? 'Delete failed', 'error')
+            }
+        } catch (err) {
+            toast(err instanceof Error ? err.message : 'Delete failed', 'error')
+        } finally {
+            setDeleting(false)
+        }
+    }, [deleteTarget, load])
+
     if (selectedSlug) {
         return (
             <TaskDetail
@@ -1552,22 +1875,20 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
     }
 
     return (
-        <div className="flex h-full flex-col overflow-hidden">
-            <div className="shrink-0 border-b border-border px-6 py-5">
+        <div className="flex h-full flex-col overflow-hidden bg-[#f8f8f9] dark:bg-[#0b0b0d]">
+            <div className="mx-auto w-full max-w-[1120px] shrink-0 px-[30px] pt-[34px] pb-5">
                 <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                        <ListChecks className="size-5 text-primary" />
-                        <h2 className="text-base font-semibold text-foreground">Background tasks</h2>
-                    </div>
+                    <h2 className="text-[24px] font-[650] tracking-[-0.02em] text-[#0d0e11] dark:text-[#f4f5f7]">Background tasks</h2>
                     <Button size="sm" onClick={() => setShowNewDialog(true)}>
                         New task
                     </Button>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-[14px] text-black/50 dark:text-white/[0.52]">
                     Persistent agents that fire on a schedule or in response to events. Toggle a task inactive to pause it.
                 </p>
             </div>
-            <div className="flex-1 overflow-auto p-6">
+            <div className="flex-1 overflow-auto">
+                <div className="mx-auto h-full w-full max-w-[1120px] px-[30px] pb-12">
                 {loading ? (
                     <div className="flex h-full items-center justify-center">
                         <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -1595,17 +1916,19 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                     <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
                         <table className="w-full table-fixed border-collapse">
                             <colgroup>
-                                <col className="w-[45%]" />
-                                <col className="w-[17%]" />
+                                <col className="w-[43%]" />
+                                <col className="w-[16%]" />
                                 <col className="w-[13%]" />
-                                <col className="w-[25%]" />
+                                <col className="w-[23%]" />
+                                <col className="w-[5%]" />
                             </colgroup>
                             <thead>
                                 <tr className="border-b border-border/60 bg-muted/30 text-left">
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Task</th>
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Schedule</th>
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Last ran</th>
-                                    <th className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">State</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">Task</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">Schedule</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">Last ran</th>
+                                    <th className="px-4 py-3 text-[13px] text-muted-foreground">State</th>
+                                    <th className="px-2 py-3"><span className="sr-only">Actions</span></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1616,94 +1939,126 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                                     const isStopping = stoppingSlugs.has(task.slug)
                                     const hasError = !isRunning && !!task.lastRunError
                                     const instructionsPreview = task.instructions.split('\n')[0].trim()
+                                    const menuProps = {
+                                        active: task.active,
+                                        busy: isRunning || isStopping || startingSlugs.has(task.slug),
+                                        updating: isUpdating,
+                                        onOpen: () => setSelectedSlug(task.slug),
+                                        onDetails: () => setDetailsTask(task),
+                                        onToggleActive: () => { void handleToggleActive(task.slug, !task.active) },
+                                        onRun: () => { void handleRunNow(task.slug) },
+                                        onDelete: () => setDeleteTarget(task),
+                                    }
                                     return (
-                                        <tr
-                                            key={task.slug}
-                                            className={`border-b border-border/50 last:border-b-0 transition-colors ${isRunning ? 'bg-primary/5' : 'hover:bg-muted/20'}`}
-                                        >
-                                            <td className="px-4 py-3 align-top">
-                                                <div className="flex min-w-0 flex-col gap-1">
-                                                    <div className="flex items-center gap-1.5">
-                                                        {hasError && (
-                                                            <AlertCircle
-                                                                className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
-                                                                aria-label="Last run failed"
-                                                            >
-                                                                <title>Last run failed: {task.lastRunError}</title>
-                                                            </AlertCircle>
-                                                        )}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setSelectedSlug(task.slug)}
-                                                            className="truncate text-left text-sm font-medium text-foreground hover:text-primary"
-                                                            title={task.name}
-                                                        >
-                                                            {task.name}
-                                                        </button>
-                                                    </div>
-                                                    <div className="truncate font-mono text-[11px] text-muted-foreground">
-                                                        {task.slug}
-                                                    </div>
-                                                    {instructionsPreview && (
-                                                        <div className="truncate text-xs text-muted-foreground/80" title={task.instructions}>
-                                                            {instructionsPreview}
+                                        <ContextMenu key={task.slug}>
+                                            <ContextMenuTrigger asChild>
+                                                <tr
+                                                    className={`border-b border-border/50 last:border-b-0 transition-colors ${isRunning ? 'bg-primary/5' : 'hover:bg-muted/20'}`}
+                                                >
+                                                    <td className="px-4 py-3 align-top">
+                                                        <div className="flex min-w-0 flex-col gap-1">
+                                                            <div className="flex items-center gap-1.5">
+                                                                {hasError && (
+                                                                    <AlertCircle
+                                                                        className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+                                                                        aria-label="Last run failed"
+                                                                    >
+                                                                        <title>Last run failed: {task.lastRunError}</title>
+                                                                    </AlertCircle>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setSelectedSlug(task.slug)}
+                                                                    className="truncate text-left text-sm font-medium text-foreground hover:text-primary"
+                                                                    title={task.name}
+                                                                >
+                                                                    {task.name}
+                                                                </button>
+                                                            </div>
+                                                            <div className="truncate font-mono text-[11px] text-muted-foreground">
+                                                                {task.slug}
+                                                            </div>
+                                                            {instructionsPreview && (
+                                                                <div className="truncate text-xs text-muted-foreground/80" title={task.instructions}>
+                                                                    {instructionsPreview}
+                                                                </div>
+                                                            )}
+                                                            {hasError && task.lastRunError && (
+                                                                <div className="truncate text-xs text-amber-600 dark:text-amber-400" title={task.lastRunError}>
+                                                                    {task.lastRunError}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    )}
-                                                    {hasError && task.lastRunError && (
-                                                        <div className="truncate text-xs text-amber-600 dark:text-amber-400" title={task.lastRunError}>
-                                                            {task.lastRunError}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-foreground/80">
-                                                {summarizeSchedule(task.triggers)}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-foreground/80">
-                                                {formatLastRanLabel(task.lastRunAt)}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {isRunning ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
-                                                            <Loader2 className="size-3 animate-spin" />
-                                                            Updating…
-                                                        </span>
-                                                        <Button
-                                                            variant="destructive"
-                                                            size="sm"
-                                                            onClick={() => handleStop(task.slug)}
-                                                            disabled={isStopping}
-                                                        >
-                                                            {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
-                                                            Stop
-                                                        </Button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex items-center gap-3">
-                                                        {isUpdating ? (
-                                                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-foreground/80">
+                                                        {summarizeSchedule(task.triggers)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-sm text-foreground/80">
+                                                        {formatLastRanLabel(task.lastRunAt)}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        {isRunning ? (
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground animate-pulse">
+                                                                    <Loader2 className="size-3 animate-spin" />
+                                                                    Updating
+                                                                </span>
+                                                                <Button
+                                                                    variant="destructive"
+                                                                    size="sm"
+                                                                    onClick={() => handleStop(task.slug)}
+                                                                    disabled={isStopping}
+                                                                    className="h-auto gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium"
+                                                                >
+                                                                    {isStopping ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+                                                                    Stop
+                                                                </Button>
+                                                            </div>
                                                         ) : (
-                                                            <span className="size-4 shrink-0" aria-hidden="true" />
+                                                            <div className="flex items-center gap-3">
+                                                                <Switch
+                                                                    checked={task.active}
+                                                                    onCheckedChange={(checked) => { void handleToggleActive(task.slug, checked) }}
+                                                                    disabled={isUpdating}
+                                                                />
+                                                                <span className="min-w-16 text-xs font-medium text-foreground/80">
+                                                                    {task.active ? 'Active' : 'Inactive'}
+                                                                </span>
+                                                                {isUpdating && (
+                                                                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                                                                )}
+                                                            </div>
                                                         )}
-                                                        <Switch
-                                                            checked={task.active}
-                                                            onCheckedChange={(checked) => { void handleToggleActive(task.slug, checked) }}
-                                                            disabled={isUpdating}
-                                                        />
-                                                        <span className="min-w-16 text-xs font-medium text-foreground/80">
-                                                            {task.active ? 'Active' : 'Inactive'}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                            </td>
-                                        </tr>
+                                                    </td>
+                                                    <td className="px-2 py-3">
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                                <button
+                                                                    type="button"
+                                                                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                                                                    aria-label={`Options for ${task.name}`}
+                                                                >
+                                                                    <MoreVertical className="size-4" />
+                                                                </button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end" className="w-44">
+                                                                <BgTaskMenuItems {...menuProps} />
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
+                                                    </td>
+                                                </tr>
+                                            </ContextMenuTrigger>
+                                            <ContextMenuContent className="w-44">
+                                                <BgTaskMenuItems context {...menuProps} />
+                                            </ContextMenuContent>
+                                        </ContextMenu>
                                     )
                                 })}
                             </tbody>
                         </table>
                     </div>
                 )}
+                </div>
             </div>
 
             <NewTaskDialog
@@ -1717,6 +2072,29 @@ export function BgTasksView({ onCreateWithCopilot, onEditWithCopilot, initialSlu
                 }}
                 onCreateWithCopilot={onCreateWithCopilot}
             />
+
+            <TaskDetailsDialog summary={detailsTask} onClose={() => setDetailsTask(null)} />
+
+            <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open && !deleting) setDeleteTarget(null) }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete &ldquo;{deleteTarget?.name}&rdquo;?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This permanently removes the task, its output, and all run history. This can&apos;t be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={e => { e.preventDefault(); void handleDelete() }}
+                            disabled={deleting}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            {deleting ? <Loader2 className="size-3 animate-spin" /> : <Trash2 className="size-3" />} Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }

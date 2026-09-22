@@ -1,11 +1,15 @@
 import { exec, execSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { getSecurityAllowList } from '../../config/security.js';
-import { getExecutionShell } from '../assistant/runtime-context.js';
+import { getExecutionShell } from '../../runtime/assembly/copilot/runtime-context.js';
 
 const execPromise = promisify(exec);
 
-const COMMAND_SPLIT_REGEX = /(?:\|\||&&|;|\||\n|`|\$\(|\(|\))/;
+// Order matters: longer separators (`||`, `&&`) must precede their single-char
+// prefixes (`|`, `&`) so the leftmost-longest match consumes the right token.
+// Missing `&` here let `echo hi & rm -rf $HOME` slip past isBlocked() — the
+// parser saw only `echo`, but the shell ran both commands.
+const COMMAND_SPLIT_REGEX = /(?:\|\||&&|&|;|\||\n|`|\$\(|\(|\))/;
 const ENV_ASSIGNMENT_REGEX = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 const WRAPPER_COMMANDS = new Set(['sudo', 'env', 'time', 'command']);
 

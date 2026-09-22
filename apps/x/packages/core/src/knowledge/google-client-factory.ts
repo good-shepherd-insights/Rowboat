@@ -1,4 +1,12 @@
 import { OAuth2Client } from 'google-auth-library';
+import { google, gmail_v1 } from 'googleapis';
+import {
+    IN_REQUEST_RETRY_FALLBACK_MS,
+    gmailCooldownInfo,
+    inRequestRetryWaitMs,
+    isRateLimitError,
+    noteGmailRateLimit,
+} from './gmail-rate-limit.js';
 import container from '../di/container.js';
 import { IOAuthRepo } from '../auth/repo.js';
 import { IClientRegistrationRepo } from '../auth/client-repo.js';
@@ -326,6 +334,44 @@ export class GoogleClientFactory {
         this.cache.clientId = clientId;
         this.cache.clientSecret = clientSecret ?? null;
         console.log('[OAuth] Google OAuth configuration initialized');
+    }
+
+    /**
+     * Gmail API client with rate-limit retry — parity with Outlook's
+     * graphFetch (outlook-client-factory.ts): one retry per request on a
+     * throttled response, waiting out the deadline Gmail names (Retry-After
+     * header or the "Retry after <timestamp>" in the error message) when it
+     * fits under the in-request cap. gaxios' stock retry can't express this —
+     * its delay formula never reads Retry-After, and its default method list
+     * excludes POST, which modify/trash/send all use — so both hooks are
+     * custom.
+     *
+     * A request that will fail anyway — retry spent, or the deadline outlasts
+     * the cap — arms the cross-cycle cooldown (gmail-rate-limit.ts) on its way
+     * out, so the background sync loops stop re-tripping the quota every tick.
+     */
+    static gmailClient(auth: OAuth2Client): gmail_v1.Gmail {
+        return google.gmail({
+            version: 'v1',
+            auth,
+            retryConfig: {
+                retry: 1,
+                shouldRetry: (err) => {
+                    if (!isRateLimitError(err)) return false;
+                    const attempt = err.config.retryConfig?.currentRetryAttempt ?? 0;
+                    if (attempt < 1 && inRequestRetryWaitMs(err) !== null) return true;
+                    const until = noteGmailRateLimit(err);
+                    const source = gmailCooldownInfo()?.source === 'gmail' ? "Gmail's stated deadline" : 'default backoff';
+                    console.warn(`[Gmail] rate limited — cooling down until ${new Date(until).toISOString()} (${source})`);
+                    return false;
+                },
+                retryBackoff: (err) => {
+                    const waitMs = inRequestRetryWaitMs(err) ?? IN_REQUEST_RETRY_FALLBACK_MS;
+                    console.warn(`[Gmail] rate limited — retrying after ${waitMs}ms`);
+                    return new Promise((resolve) => setTimeout(resolve, waitMs));
+                },
+            },
+        });
     }
 
     /** BYOK OAuth2Client — has client_id + secret + refresh_token. */
